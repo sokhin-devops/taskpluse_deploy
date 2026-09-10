@@ -1,0 +1,57 @@
+---
+- name: Deploy TaskPluse API
+  hosts: production
+  become: true
+
+  vars:
+    image: "registry.sokhin.site/docker-hosted/taskpluse-api:{{ image_tag }}"
+
+  tasks:
+
+    - name: Pull Docker image
+      community.docker.docker_image:
+        name: "{{ image }}"
+        source: pull
+
+    - name: Stop current API container
+      community.docker.docker_container:
+        name: taskpluse-api
+        state: stopped
+      ignore_errors: true
+
+    - name: Remove current API container
+      community.docker.docker_container:
+        name: taskpluse-api
+        state: absent
+
+    - name: Start new API container
+      community.docker.docker_container:
+        name: taskpluse-api
+        image: "{{ image }}"
+        state: started
+        restart_policy: unless-stopped
+        env_file: /root/taskpluse-api.env
+        networks:
+          - name: taskpluse-network
+        published_ports:
+          - "127.0.0.1:8082:8082"
+
+    - name: Wait for API
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8082
+        delay: 5
+        timeout: 60
+
+    - name: Check API health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8082/actuator/health
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 5
+      until: health_check.status == 200
+
+    - name: Show health status
+      ansible.builtin.debug:
+        msg: "TaskPluse API is healthy: {{ health_check.json }}"
