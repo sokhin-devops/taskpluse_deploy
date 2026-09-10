@@ -1,4 +1,3 @@
-```groovy
 pipeline {
 
     agent any
@@ -39,7 +38,6 @@ pipeline {
         stage('Validate Parameters') {
             steps {
                 script {
-
                     if (!params.IMAGE_TAG?.trim()) {
                         error('IMAGE_TAG cannot be empty')
                     }
@@ -146,8 +144,7 @@ pipeline {
                         echo "Deploying TaskPluse API"
                         echo "================================="
                         echo "Image tag: ${IMAGE_TAG}"
-                        echo "Image:"
-                        echo "registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
+                        echo "Image: registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
                         echo "Production host: ${DEPLOY_HOST}"
                         echo "================================="
 
@@ -204,14 +201,14 @@ pipeline {
 
         success {
             echo '================================='
-            echo '✅ TaskPluse Deployment SUCCESS'
+            echo 'TaskPluse Deployment SUCCESS'
             echo '================================='
             echo "Image deployed: registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
         }
 
         failure {
             echo '================================='
-            echo '❌ TaskPluse Deployment FAILED'
+            echo 'TaskPluse Deployment FAILED'
             echo '================================='
             echo "Failed image: registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
         }
@@ -223,4 +220,3 @@ pipeline {
         }
     }
 }
-```
