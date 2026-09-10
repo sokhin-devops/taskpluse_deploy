@@ -3,13 +3,26 @@ pipeline {
 
     agent any
 
-    parameters {
-        string(
-            name: 'IMAGE_TAG',
-            defaultValue: '11',
-            description: 'Docker image tag to deploy'
-        )
+parameters {
+    string(
+        name: 'IMAGE_TAG',
+        defaultValue: '11',
+        description: 'Docker image tag to deploy'
+    )
+}
+
+stage('Validate Parameters') {
+    steps {
+        script {
+            if (!params.IMAGE_TAG?.trim()) {
+                error('IMAGE_TAG cannot be empty')
+            }
+
+            echo "Deploying image tag: ${params.IMAGE_TAG}"
+        }
     }
+}
+
 
     stages {
 
