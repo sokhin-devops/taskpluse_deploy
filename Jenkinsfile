@@ -3,6 +3,7 @@ pipeline {
 
     agent any
 
+    ```groovy
 parameters {
     string(
         name: 'IMAGE_TAG',
@@ -10,7 +11,11 @@ parameters {
         description: 'Docker image tag to deploy'
     )
 }
+```
 
+Then add this stage **before Deploy**:
+
+```groovy
 stage('Validate Parameters') {
     steps {
         script {
@@ -22,6 +27,7 @@ stage('Validate Parameters') {
         }
     }
 }
+```
 
 
     stages {
