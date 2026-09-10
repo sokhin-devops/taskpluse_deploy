@@ -7,13 +7,13 @@ pipeline {
         timestamps()
     }
 
-    parameters {
-        string(
-            name: 'IMAGE_TAG',
-            defaultValue: '13',
-            description: 'Docker image tag to deploy from Nexus'
-        )
-    }
+ parameters {
+    string(
+        name: 'IMAGE_TAG',
+        defaultValue: '13',
+        description: 'Docker image tag to deploy from Nexus'
+    )
+}
 
     environment {
         DEPLOY_HOST = '64.177.41.133'
