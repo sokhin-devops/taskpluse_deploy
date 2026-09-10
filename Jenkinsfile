@@ -1,3 +1,4 @@
+```groovy
 pipeline {
 
     agent any
@@ -48,6 +49,7 @@ pipeline {
                     echo '================================='
                     echo "Image tag: ${params.IMAGE_TAG}"
                     echo "Production host: ${env.DEPLOY_HOST}"
+                    echo "Docker image: registry.sokhin.site/docker-hosted/taskpluse-api:${params.IMAGE_TAG}"
                     echo '================================='
                 }
             }
@@ -72,13 +74,26 @@ pipeline {
 
         stage('Test SSH Connection') {
             steps {
-                sshagent(["${SSH_CREDENTIAL}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
                     sh '''
+                        set -e
+
                         echo "=== Testing SSH Connection ==="
 
+                        chmod 600 "$SSH_KEY"
+
                         ssh \
+                            -i "$SSH_KEY" \
+                            -o IdentitiesOnly=yes \
                             -o StrictHostKeyChecking=no \
-                            ${DEPLOY_USER}@${DEPLOY_HOST} \
+                            -o ConnectTimeout=10 \
+                            "$SSH_USER@$DEPLOY_HOST" \
                             "echo SSH_OK"
 
                         echo "SSH connection successful."
@@ -89,12 +104,24 @@ pipeline {
 
         stage('Test Ansible Connection') {
             steps {
-                sshagent(["${SSH_CREDENTIAL}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
                     sh '''
+                        set -e
+
                         echo "=== Testing Ansible Connection ==="
+
+                        chmod 600 "$SSH_KEY"
 
                         ansible production \
                             -i inventory/hosts.ini \
+                            -e "ansible_user=$SSH_USER" \
+                            -e "ansible_ssh_private_key_file=$SSH_KEY" \
                             -m ping
 
                         echo "Ansible connection successful."
@@ -105,18 +132,31 @@ pipeline {
 
         stage('Deploy Production') {
             steps {
-                sshagent(["${SSH_CREDENTIAL}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
                     sh '''
+                        set -e
+
                         echo "================================="
                         echo "Deploying TaskPluse API"
                         echo "================================="
                         echo "Image tag: ${IMAGE_TAG}"
                         echo "Image:"
                         echo "registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
+                        echo "Production host: ${DEPLOY_HOST}"
                         echo "================================="
+
+                        chmod 600 "$SSH_KEY"
 
                         ansible-playbook \
                             -i inventory/hosts.ini \
+                            -e "ansible_user=$SSH_USER" \
+                            -e "ansible_ssh_private_key_file=$SSH_KEY" \
                             playbooks/deploy.yml \
                             -e "image_tag=${IMAGE_TAG}"
 
@@ -130,13 +170,26 @@ pipeline {
 
         stage('Verify Production API') {
             steps {
-                sshagent(["${SSH_CREDENTIAL}"]) {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
                     sh '''
+                        set -e
+
                         echo "=== Checking Production API ==="
 
+                        chmod 600 "$SSH_KEY"
+
                         ssh \
+                            -i "$SSH_KEY" \
+                            -o IdentitiesOnly=yes \
                             -o StrictHostKeyChecking=no \
-                            ${DEPLOY_USER}@${DEPLOY_HOST} \
+                            -o ConnectTimeout=10 \
+                            "$SSH_USER@$DEPLOY_HOST" \
                             "curl -fsS http://127.0.0.1:8082/actuator/health"
 
                         echo ""
@@ -160,6 +213,7 @@ pipeline {
             echo '================================='
             echo '❌ TaskPluse Deployment FAILED'
             echo '================================='
+            echo "Failed image: registry.sokhin.site/docker-hosted/taskpluse-api:${IMAGE_TAG}"
         }
 
         always {
@@ -169,3 +223,4 @@ pipeline {
         }
     }
 }
+```
