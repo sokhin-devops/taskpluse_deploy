@@ -17,10 +17,14 @@ pipeline {
     stages {
 
         stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
+    steps {
+        git(
+            url: 'https://github.com/sokhin-devops/taskpluse_deploy.git',
+            branch: 'main',
+            credentialsId: 'github-taskpluse'
+        )
+    }
+}
 
         stage('Validate Parameters') {
             steps {
