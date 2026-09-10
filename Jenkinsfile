@@ -50,36 +50,36 @@ pipeline {
         }
 
         stage('Test Production Connection') {
-            steps {
-                sshagent(['taskpluse-prod-ssh']) {
-                    sh '''
-                        echo "=== Testing Production SSH with Ansible ==="
+    steps {
+        sshagent(['taskpluse-prod-ssh']) {
+            sh '''
+                echo "=== Testing Production SSH with Ansible ==="
 
-                        ansible production \
-                            -i inventory/hosts.ini \
-                            -m ping
-                    '''
-                }
-            }
+                ansible production \
+                    -i inventory/hosts.ini \
+                    -m ping
+            '''
         }
+    }
+}
 
         stage('Deploy Production') {
-            steps {
-                sshagent(['taskpluse-prod-ssh']) {
-                    sh '''
-                        echo "================================="
-                        echo "Deploying TaskPluse API"
-                        echo "Image tag: ${IMAGE_TAG}"
-                        echo "================================="
+    steps {
+        sshagent(['taskpluse-prod-ssh']) {
+            sh '''
+                echo "================================="
+                echo "Deploying TaskPluse API"
+                echo "Image tag: ${IMAGE_TAG}"
+                echo "================================="
 
-                        ansible-playbook \
-                            -i inventory/hosts.ini \
-                            playbooks/deploy.yml \
-                            -e "image_tag=${IMAGE_TAG}"
-                    '''
-                }
-            }
+                ansible-playbook \
+                    -i inventory/hosts.ini \
+                    playbooks/deploy.yml \
+                    -e "image_tag=${IMAGE_TAG}"
+            '''
         }
+    }
+}
     }
 
     post {
