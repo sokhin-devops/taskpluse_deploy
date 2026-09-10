@@ -12,16 +12,20 @@
     # =========================================================
     # 1. Get currently deployed image
     # =========================================================
-    - name: Get current deployed image
-      ansible.builtin.shell:
-        cmd: 'docker inspect taskpluse-api --format "{{.Config.Image}}"'
-      register: current_image_result
-      changed_when: false
+    - name: Get current API container information
+      community.docker.docker_container_info:
+        name: taskpluse-api
+      register: current_container
       failed_when: false
 
     - name: Save previous image
       ansible.builtin.set_fact:
-        previous_image: "{{ current_image_result.stdout | trim }}"
+        previous_image: >-
+          {{
+            current_container.container.Config.Image
+            if current_container.exists | default(false)
+            else ''
+          }}
 
     - name: Show deployment versions
       ansible.builtin.debug:
@@ -149,7 +153,7 @@
               - "127.0.0.1:8082:8082"
 
         # -----------------------------------------------------
-        # Wait for rollback API
+        # Wait for rollback API port
         # -----------------------------------------------------
         - name: Wait for rollback API port
           ansible.builtin.wait_for:
@@ -203,7 +207,7 @@
           Deployment of {{ image }} failed health check,
           and no previous image was available for rollback.
 
-    # =========================================================
+        # =========================================================
     # 10. Show successful deployment
     # =========================================================
     - name: Show successful deployment
