@@ -1,228 +1,216 @@
 ---
-
-* name: Deploy TaskPluse API
+- name: Deploy TaskPluse API
   hosts: production
   become: true
 
   vars:
-  image_repository: "registry.sokhin.site/docker-hosted/taskpluse-api"
-  image: "{{ image_repository }}:{{ image_tag }}"
+    image_repository: "registry.sokhin.site/docker-hosted/taskpluse-api"
+    image: "{{ image_repository }}:{{ image_tag }}"
 
   tasks:
 
-  # ---------------------------------------------------------
+    # =========================================================
+    # 1. Get currently deployed image
+    # =========================================================
+    - name: Get current deployed image
+      ansible.builtin.shell:
+        cmd: 'docker inspect taskpluse-api --format "{{.Config.Image}}"'
+      register: current_image_result
+      changed_when: false
+      failed_when: false
 
-  # 1. Get currently deployed image
+    - name: Save previous image
+      ansible.builtin.set_fact:
+        previous_image: "{{ current_image_result.stdout | trim }}"
 
-  # ---------------------------------------------------------
-
-  * name: Get current deployed image
-    ansible.builtin.shell:
-    cmd: >
-    docker inspect taskpluse-api
-    --format '{{ "{{.Config.Image}}" }}'
-    register: current_image_result
-    changed_when: false
-    failed_when: false
-
-  * name: Save previous image
-    ansible.builtin.set_fact:
-    previous_image: "{{ current_image_result.stdout | trim }}"
-
-  * name: Show deployment versions
-    ansible.builtin.debug:
-    msg:
-    - "Previous image: {{ previous_image | default('none') }}"
-    - "New image: {{ image }}"
-
-  # ---------------------------------------------------------
-
-  # 2. Pull new image
-
-  # ---------------------------------------------------------
-
-  * name: Pull new Docker image
-    community.docker.docker_image:
-    name: "{{ image }}"
-    source: pull
-
-  # ---------------------------------------------------------
-
-  # 3. Stop current container
-
-  # ---------------------------------------------------------
-
-  * name: Stop current API container
-    community.docker.docker_container:
-    name: taskpluse-api
-    state: stopped
-    ignore_errors: true
-
-  # ---------------------------------------------------------
-
-  # 4. Remove current container
-
-  # ---------------------------------------------------------
-
-  * name: Remove current API container
-    community.docker.docker_container:
-    name: taskpluse-api
-    state: absent
-
-  # ---------------------------------------------------------
-
-  # 5. Start new container
-
-  # ---------------------------------------------------------
-
-  * name: Start new API container
-    community.docker.docker_container:
-    name: taskpluse-api
-    image: "{{ image }}"
-    state: started
-    restart_policy: unless-stopped
-    env_file: /root/taskpluse-api.env
-    networks:
-    - name: taskpluse-network
-    published_ports:
-    - "127.0.0.1:8082:8082"
-
-  # ---------------------------------------------------------
-
-  # 6. Wait for API port
-
-  # ---------------------------------------------------------
-
-  * name: Wait for API port
-    ansible.builtin.wait_for:
-    host: 127.0.0.1
-    port: 8082
-    delay: 5
-    timeout: 60
-
-  # ---------------------------------------------------------
-
-  # 7. Health check
-
-  # ---------------------------------------------------------
-
-  * name: Check API health
-    ansible.builtin.uri:
-    url: http://127.0.0.1:8082/actuator/health
-    status_code: 200
-    return_content: true
-    register: health_check
-    retries: 5
-    delay: 5
-    until: health_check.status == 200
-    ignore_errors: true
-
-  # ---------------------------------------------------------
-
-  # 8. Rollback if health check failed
-
-  # ---------------------------------------------------------
-
-  * name: Rollback to previous image
-    when:
-
-    * health_check is failed or health_check.status | default(0) != 200
-
-    * previous_image is defined
-
-    * previous_image | length > 0
-      block:
-
-    * name: Show rollback message
+    - name: Show deployment versions
       ansible.builtin.debug:
-      msg: "Health check failed. Rolling back to {{ previous_image }}"
+        msg:
+          - "Previous image: {{ previous_image | default('none') }}"
+          - "New image: {{ image }}"
 
-    * name: Stop failed API container
-      community.docker.docker_container:
-      name: taskpluse-api
-      state: stopped
-      ignore_errors: true
-
-    * name: Remove failed API container
-      community.docker.docker_container:
-      name: taskpluse-api
-      state: absent
-      ignore_errors: true
-
-    * name: Pull previous Docker image
+    # =========================================================
+    # 2. Pull new Docker image
+    # =========================================================
+    - name: Pull new Docker image
       community.docker.docker_image:
-      name: "{{ previous_image }}"
-      source: pull
+        name: "{{ image }}"
+        source: pull
 
-    * name: Start previous API container
+    # =========================================================
+    # 3. Stop current API container
+    # =========================================================
+    - name: Stop current API container
       community.docker.docker_container:
-      name: taskpluse-api
-      image: "{{ previous_image }}"
-      state: started
-      restart_policy: unless-stopped
-      env_file: /root/taskpluse-api.env
-      networks:
-      - name: taskpluse-network
-      published_ports:
-      - "127.0.0.1:8082:8082"
+        name: taskpluse-api
+        state: stopped
+      ignore_errors: true
 
-    * name: Wait for rollback API port
+    # =========================================================
+    # 4. Remove current API container
+    # =========================================================
+    - name: Remove current API container
+      community.docker.docker_container:
+        name: taskpluse-api
+        state: absent
+
+    # =========================================================
+    # 5. Start new API container
+    # =========================================================
+    - name: Start new API container
+      community.docker.docker_container:
+        name: taskpluse-api
+        image: "{{ image }}"
+        state: started
+        restart_policy: unless-stopped
+        env_file: /root/taskpluse-api.env
+        networks:
+          - name: taskpluse-network
+        published_ports:
+          - "127.0.0.1:8082:8082"
+
+    # =========================================================
+    # 6. Wait for API port
+    # =========================================================
+    - name: Wait for API port
       ansible.builtin.wait_for:
-      host: 127.0.0.1
-      port: 8082
-      delay: 5
-      timeout: 60
+        host: 127.0.0.1
+        port: 8082
+        delay: 5
+        timeout: 60
 
-    * name: Check rollback health
+    # =========================================================
+    # 7. Health check new deployment
+    # =========================================================
+    - name: Check API health
       ansible.builtin.uri:
-      url: http://127.0.0.1:8082/actuator/health
-      status_code: 200
-      return_content: true
-      register: rollback_health
+        url: http://127.0.0.1:8082/actuator/health
+        status_code: 200
+        return_content: true
+      register: health_check
       retries: 5
       delay: 5
-      until: rollback_health.status == 200
+      until: health_check.status == 200
+      ignore_errors: true
 
-    * name: Show rollback result
-      ansible.builtin.debug:
-      msg: "Rollback successful. Running image: {{ previous_image }}"
+    # =========================================================
+    # 8. Rollback if health check fails
+    # =========================================================
+    - name: Rollback to previous image
+      when:
+        - health_check.failed | default(false) or (health_check.status | default(0) != 200)
+        - previous_image is defined
+        - previous_image | length > 0
+      block:
 
-    * name: Fail deployment after rollback
+        - name: Show rollback message
+          ansible.builtin.debug:
+            msg: "Health check failed. Rolling back to {{ previous_image }}"
+
+        # -----------------------------------------------------
+        # Stop failed container
+        # -----------------------------------------------------
+        - name: Stop failed API container
+          community.docker.docker_container:
+            name: taskpluse-api
+            state: stopped
+          ignore_errors: true
+
+        # -----------------------------------------------------
+        # Remove failed container
+        # -----------------------------------------------------
+        - name: Remove failed API container
+          community.docker.docker_container:
+            name: taskpluse-api
+            state: absent
+          ignore_errors: true
+
+        # -----------------------------------------------------
+        # Pull previous image
+        # -----------------------------------------------------
+        - name: Pull previous Docker image
+          community.docker.docker_image:
+            name: "{{ previous_image }}"
+            source: pull
+
+        # -----------------------------------------------------
+        # Start previous image
+        # -----------------------------------------------------
+        - name: Start previous API container
+          community.docker.docker_container:
+            name: taskpluse-api
+            image: "{{ previous_image }}"
+            state: started
+            restart_policy: unless-stopped
+            env_file: /root/taskpluse-api.env
+            networks:
+              - name: taskpluse-network
+            published_ports:
+              - "127.0.0.1:8082:8082"
+
+        # -----------------------------------------------------
+        # Wait for rollback API
+        # -----------------------------------------------------
+        - name: Wait for rollback API port
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 8082
+            delay: 5
+            timeout: 60
+
+        # -----------------------------------------------------
+        # Check rollback health
+        # -----------------------------------------------------
+        - name: Check rollback health
+          ansible.builtin.uri:
+            url: http://127.0.0.1:8082/actuator/health
+            status_code: 200
+            return_content: true
+          register: rollback_health
+          retries: 5
+          delay: 5
+          until: rollback_health.status == 200
+
+        # -----------------------------------------------------
+        # Show rollback result
+        # -----------------------------------------------------
+        - name: Show rollback result
+          ansible.builtin.debug:
+            msg:
+              - "Rollback successful"
+              - "Running image: {{ previous_image }}"
+              - "Health: {{ rollback_health.json }}"
+
+        # -----------------------------------------------------
+        # Mark deployment as failed
+        # -----------------------------------------------------
+        - name: Fail deployment after rollback
+          ansible.builtin.fail:
+            msg: >
+              Deployment of {{ image }} failed health check.
+              Automatically rolled back to {{ previous_image }}.
+              Rollback health check passed.
+
+    # =========================================================
+    # 9. Fail if no previous image exists
+    # =========================================================
+    - name: Fail deployment because no previous image exists
+      when:
+        - health_check.failed | default(false) or (health_check.status | default(0) != 200)
+        - previous_image is not defined or previous_image | length == 0
       ansible.builtin.fail:
-      msg: >
-      Deployment of {{ image }} failed health check.
-      Automatically rolled back to {{ previous_image }}.
-      Rollback health check passed.
+        msg: >
+          Deployment of {{ image }} failed health check,
+          and no previous image was available for rollback.
 
-  # ---------------------------------------------------------
-
-  # 9. Fail if no previous image exists
-
-  # ---------------------------------------------------------
-
-  * name: Fail deployment because no previous image exists
-    when:
-
-    * health_check is failed or health_check.status | default(0) != 200
-    * previous_image is not defined or previous_image | length == 0
-      ansible.builtin.fail:
-      msg: >
-      Deployment of {{ image }} failed health check,
-      and no previous image was available for rollback.
-
-  # ---------------------------------------------------------
-
-  # 10. Show successful deployment
-
-  # ---------------------------------------------------------
-
-  * name: Show health status
-    when:
-
-    * health_check.status | default(0) == 200
+    # =========================================================
+    # 10. Show successful deployment
+    # =========================================================
+    - name: Show successful deployment
+      when:
+        - health_check.status | default(0) == 200
       ansible.builtin.debug:
-      msg:
-
-      * "TaskPluse API deployment successful"
-      * "Running image: {{ image }}"
-      * "Health: {{ health_check.json }}"
+        msg:
+          - "TaskPluse API deployment successful"
+          - "Running image: {{ image }}"
+          - "Health: {{ health_check.json }}"
