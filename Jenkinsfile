@@ -1,40 +1,36 @@
-```groovy
 pipeline {
 
     agent any
 
-    ```groovy
-parameters {
-    string(
-        name: 'IMAGE_TAG',
-        defaultValue: '11',
-        description: 'Docker image tag to deploy'
-    )
-}
-```
-
-Then add this stage **before Deploy**:
-
-```groovy
-stage('Validate Parameters') {
-    steps {
-        script {
-            if (!params.IMAGE_TAG?.trim()) {
-                error('IMAGE_TAG cannot be empty')
-            }
-
-            echo "Deploying image tag: ${params.IMAGE_TAG}"
-        }
+    options {
+        skipDefaultCheckout(true)
     }
-}
-```
 
+    parameters {
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: '13',
+            description: 'Docker image tag to deploy'
+        )
+    }
 
     stages {
 
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    if (!params.IMAGE_TAG?.trim()) {
+                        error('IMAGE_TAG cannot be empty')
+                    }
+
+                    echo "Deploying image tag: ${params.IMAGE_TAG}"
+                }
             }
         }
 
@@ -101,4 +97,3 @@ stage('Validate Parameters') {
         }
     }
 }
-```
