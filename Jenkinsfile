@@ -70,35 +70,45 @@ pipeline {
             }
         }
 
-        stage('Test SSH Connection') {
-            steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: "${SSH_CREDENTIAL}",
-                        keyFileVariable: 'SSH_KEY',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    sh '''
-                        set -e
+        stage('Debug SSH Key') {
+    steps {
+        withCredentials([
+            sshUserPrivateKey(
+                credentialsId: 'taskpluse-prod-ssh-rsa',
+                keyFileVariable: 'SSH_KEY',
+                usernameVariable: 'SSH_USER'
+            )
+        ]) {
+            sh '''
+                set -e
 
-                        echo "=== Testing SSH Connection ==="
+                echo "=== SSH KEY DEBUG ==="
 
-                        chmod 600 "$SSH_KEY"
+                echo "Key path:"
+                echo "$SSH_KEY"
 
-                        ssh \
-                            -i "$SSH_KEY" \
-                            -o IdentitiesOnly=yes \
-                            -o StrictHostKeyChecking=no \
-                            -o ConnectTimeout=10 \
-                            "$SSH_USER@$DEPLOY_HOST" \
-                            "echo SSH_OK"
+                echo ""
+                echo "Key file:"
+                ls -la "$SSH_KEY"
 
-                        echo "SSH connection successful."
-                    '''
-                }
-            }
+                echo ""
+                echo "First line:"
+                head -n 1 "$SSH_KEY"
+
+                echo ""
+                echo "Last line:"
+                tail -n 1 "$SSH_KEY"
+
+                echo ""
+                echo "Key type:"
+                ssh-keygen -y -f "$SSH_KEY" > /tmp/test_public_key.pub
+
+                echo ""
+                echo "SSH key is VALID"
+            '''
         }
+    }
+}
 
         stage('Test Ansible Connection') {
             steps {
