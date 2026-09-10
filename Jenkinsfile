@@ -1,3 +1,4 @@
+```groovy
 pipeline {
 
     agent any
@@ -21,44 +22,64 @@ pipeline {
         stage('Verify Ansible') {
             steps {
                 sh '''
+                    echo "=== Ansible Version ==="
                     ansible --version
+
+                    echo "=== Ansible Playbook Version ==="
                     ansible-playbook --version
+
+                    echo "=== Docker Collection ==="
+                    ansible-galaxy collection list | grep community.docker || true
                 '''
             }
         }
 
         stage('Test Production Connection') {
             steps {
-                sh '''
-                    ansible production \
-                      -i inventory/hosts.ini \
-                      -m ping
-                '''
+                sshagent(['taskpluse-prod-ssh']) {
+                    sh '''
+                        echo "=== Testing Production SSH with Ansible ==="
+
+                        ansible production \
+                            -i inventory/hosts.ini \
+                            -m ping
+                    '''
+                }
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy Production') {
             steps {
-                sh '''
-                    ansible-playbook \
-                      -i inventory/hosts.ini \
-                      playbooks/deploy.yml \
-                      -e "image_tag=${IMAGE_TAG}"
-                '''
+                sshagent(['taskpluse-prod-ssh']) {
+                    sh '''
+                        echo "================================="
+                        echo "Deploying TaskPluse API"
+                        echo "Image tag: ${IMAGE_TAG}"
+                        echo "================================="
+
+                        ansible-playbook \
+                            -i inventory/hosts.ini \
+                            playbooks/deploy.yml \
+                            -e "image_tag=${IMAGE_TAG}"
+                    '''
+                }
             }
         }
-
     }
 
     post {
 
         success {
-            echo '✅ TaskPulse deployment successful'
+            echo '================================='
+            echo '✅ TaskPluse deployment SUCCESS'
+            echo '================================='
         }
 
         failure {
-            echo '❌ TaskPulse deployment failed'
+            echo '================================='
+            echo '❌ TaskPluse deployment FAILED'
+            echo '================================='
         }
-
     }
 }
+```
