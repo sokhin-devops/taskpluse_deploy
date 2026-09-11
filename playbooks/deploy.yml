@@ -1,32 +1,54 @@
 ---
-- name: Deploy TaskPluse API
+- name: Deploy TaskPluse API (blue-green)
   hosts: production
   become: true
 
   vars:
     image: "registry.sokhin.site/docker-hosted/taskpluse-api:{{ image_tag }}"
+    active_color_file: /root/taskpluse-active-color
 
   tasks:
+
+    - name: Check if active-color file exists
+      ansible.builtin.stat:
+        path: "{{ active_color_file }}"
+      register: active_color_stat
+
+    - name: Default active color to blue (first run)
+      ansible.builtin.set_fact:
+        active_color: blue
+      when: not active_color_stat.stat.exists
+
+    - name: Slurp active color file from the remote host
+      ansible.builtin.slurp:
+        src: "{{ active_color_file }}"
+      register: active_color_raw
+      when: active_color_stat.stat.exists
+
+    - name: Set active color fact from file content
+      ansible.builtin.set_fact:
+        active_color: "{{ active_color_raw.content | b64decode | trim }}"
+      when: active_color_stat.stat.exists
+
+
+    - name: Compute idle color and port
+      ansible.builtin.set_fact:
+        idle_color: "{{ 'green' if active_color == 'blue' else 'blue' }}"
+        idle_port: "{{ 8083 if active_color == 'blue' else 8082 }}"
 
     - name: Pull Docker image
       community.docker.docker_image:
         name: "{{ image }}"
         source: pull
 
-    - name: Stop current API container
+    - name: Remove any stale container in the idle slot
       community.docker.docker_container:
-        name: taskpluse-api
-        state: stopped
-      ignore_errors: true
-
-    - name: Remove current API container
-      community.docker.docker_container:
-        name: taskpluse-api
+        name: "taskpluse-api-{{ idle_color }}"
         state: absent
 
-    - name: Start new API container
+    - name: Start new container in the idle slot
       community.docker.docker_container:
-        name: taskpluse-api
+        name: "taskpluse-api-{{ idle_color }}"
         image: "{{ image }}"
         state: started
         restart_policy: unless-stopped
@@ -34,24 +56,46 @@
         networks:
           - name: taskpluse-network
         published_ports:
-          - "127.0.0.1:8082:8082"
+          - "127.0.0.1:{{ idle_port }}:8082"
 
-    - name: Wait for API
+    - name: Wait for idle container to accept connections
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: 8082
+        port: "{{ idle_port }}"
         delay: 5
         timeout: 60
 
-    - name: Check API health
+    - name: Health-check the idle container before it takes real traffic
       ansible.builtin.uri:
-        url: http://127.0.0.1:8082/actuator/health
+        url: "http://127.0.0.1:{{ idle_port }}/actuator/health"
         status_code: 200
       register: health_check
       retries: 5
       delay: 5
       until: health_check.status == 200
 
+    - name: Point nginx upstream at the newly-verified container
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/taskpluse-active.conf
+        content: |
+          upstream taskpluse_api {
+              server 127.0.0.1:{{ idle_port }};
+          }
+      notify: Reload nginx
+
+    - meta: flush_handlers
+
+    - name: Record new active color
+      ansible.builtin.copy:
+        dest: "{{ active_color_file }}"
+        content: "{{ idle_color }}"
+
     - name: Show health status
       ansible.builtin.debug:
-        msg: "TaskPluse API is healthy: {{ health_check.json }}"
+        msg: "TaskPluse API ({{ idle_color }}, port {{ idle_port }}) is live and healthy: {{ health_check.json }}"
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
