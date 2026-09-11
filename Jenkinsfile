@@ -197,7 +197,7 @@ pipeline {
                             -o StrictHostKeyChecking=no \
                             -o ConnectTimeout=10 \
                             "$SSH_USER@$DEPLOY_HOST" \
-                            "curl -fsS http://127.0.0.1:8082/actuator/health"
+                            "curl -fsS https://taskpluse-api.sokhin.site/actuator/health"
 
                         echo ""
                         echo "Production API health check passed."
