@@ -1,0 +1,117 @@
+pipeline {
+
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    environment {
+        DEPLOY_HOST = '64.177.41.133'
+        DEPLOY_USER = 'root'
+        SSH_CREDENTIAL = 'taskpluse-prod-ssh-rsa'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo '=== Checkout Deployment Repository ==='
+
+                git(
+                    url: 'https://github.com/sokhin-devops/taskpluse_deploy.git',
+                    branch: 'main',
+                    credentialsId: 'github-taskpluse'
+                )
+            }
+        }
+
+        stage('Rollback Production') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        set -e
+
+                        echo "================================="
+                        echo "Rolling back TaskPluse API"
+                        echo "Production host: ${DEPLOY_HOST}"
+                        echo "================================="
+
+                        chmod 600 "$SSH_KEY"
+
+                        ansible-playbook \
+                            -i inventory/hosts.ini \
+                            -e "ansible_user=$SSH_USER" \
+                            -e "ansible_ssh_private_key_file=$SSH_KEY" \
+                            playbooks/rollback.yml
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Production API') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: "${SSH_CREDENTIAL}",
+                        keyFileVariable: 'SSH_KEY',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    sh '''
+                        set -e
+
+                        echo "=== Checking Production API ==="
+
+                        chmod 600 "$SSH_KEY"
+
+                        ssh \
+                            -i "$SSH_KEY" \
+                            -o IdentitiesOnly=yes \
+                            -o StrictHostKeyChecking=no \
+                            -o ConnectTimeout=10 \
+                            "$SSH_USER@$DEPLOY_HOST" \
+                            "curl -fsS https://taskpluse-api.sokhin.site/actuator/health"
+
+                        echo ""
+                        echo "Production API health check passed."
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo '================================='
+            echo 'TaskPluse ROLLBACK SUCCESS'
+            echo '================================='
+            echo 'See the "Show rollback result" task above for'
+            echo 'which color and image tag is now serving traffic.'
+            echo ''
+            echo 'NOTE: rollback is a TOGGLE. Running it again flips'
+            echo 'back to the version you just rolled away from.'
+        }
+
+        failure {
+            echo '================================='
+            echo 'TaskPluse ROLLBACK FAILED'
+            echo '================================='
+            echo 'Production is most likely UNCHANGED - the playbook'
+            echo 'checks the target container before touching nginx.'
+            echo ''
+            echo 'Check the live state on the VM:'
+            echo '  cat /root/taskpluse-active-color'
+            echo '  docker ps --filter "name=taskpluse-api"'
+            echo '  nginx -T | grep -A2 "upstream taskpluse_api"'
+        }
+    }
+}

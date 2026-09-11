@@ -1,0 +1,73 @@
+---
+- name: Roll back TaskPluse API to the other color
+  hosts: production
+  become: true
+
+  vars:
+    active_color_file: /root/taskpluse-active-color
+
+  tasks:
+
+    - name: Read current active color
+      ansible.builtin.slurp:
+        src: "{{ active_color_file }}"
+      register: active_color_raw
+
+    - name: Set active color fact
+      ansible.builtin.set_fact:
+        active_color: "{{ active_color_raw.content | b64decode | trim }}"
+
+    - name: Compute rollback target color and port
+      ansible.builtin.set_fact:
+        target_color: "{{ 'green' if active_color == 'blue' else 'blue' }}"
+        target_port: "{{ 8083 if active_color == 'blue' else 8082 }}"
+
+    - name: Inspect the rollback target container
+      community.docker.docker_container_info:
+        name: "taskpluse-api-{{ target_color }}"
+      register: target_container
+
+    - name: Fail early if there is nothing to roll back to
+      ansible.builtin.assert:
+        that:
+          - target_container.exists
+          - target_container.container.State.Running
+        fail_msg: "Cannot roll back: container taskpluse-api-{{ target_color }} is missing or not running."
+
+    - name: Health-check the rollback target before switching
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ target_port }}/actuator/health"
+        status_code: 200
+      register: health_check
+      retries: 3
+      delay: 3
+      until: health_check.status == 200
+
+    - name: Point nginx upstream at the rollback target
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/taskpluse-active.conf
+        content: |
+          upstream taskpluse_api {
+              server 127.0.0.1:{{ target_port }};
+          }
+      notify: Reload nginx
+
+    - meta: flush_handlers
+
+    - name: Record new active color
+      ansible.builtin.copy:
+        dest: "{{ active_color_file }}"
+        content: "{{ target_color }}"
+
+    - name: Show rollback result
+      ansible.builtin.debug:
+        msg: >-
+          Rolled back from {{ active_color }} to {{ target_color }}
+          (port {{ target_port }}), now serving image
+          {{ target_container.container.Config.Image }}
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
