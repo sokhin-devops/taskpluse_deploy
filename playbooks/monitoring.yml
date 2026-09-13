@@ -1,0 +1,136 @@
+---
+- name: Deploy the monitoring stack
+  hosts: production
+  become: true
+
+  vars:
+    node_exporter_image: quay.io/prometheus/node-exporter:latest
+    cadvisor_image: gcr.io/cadvisor/cadvisor:latest
+    prometheus_image: quay.io/prometheus/prometheus:latest
+    grafana_image: grafana/grafana:latest
+    grafana_env_file: /root/grafana.env
+    # The prometheus image runs as this uid and cannot write to a root-owned
+    # data directory; it crash-loops on startup instead of reporting why.
+    prometheus_uid: 65534
+
+  tasks:
+
+    - name: Ensure the Prometheus directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "0755"
+      loop:
+        - { path: /etc/prometheus, owner: root, group: root }
+        - { path: /var/lib/prometheus, owner: "{{ prometheus_uid }}", group: "{{ prometheus_uid }}" }
+
+    - name: Copy the Prometheus scrape config
+      ansible.builtin.copy:
+        src: ../files/prometheus/prometheus.yml
+        dest: /etc/prometheus/prometheus.yml
+        mode: "0644"
+      notify: Reload prometheus
+
+    # Host networking plus the root mount are what let it report the VM's own
+    # CPU/RAM/disk rather than the container's.
+    - name: Start Node Exporter
+      community.docker.docker_container:
+        name: node-exporter
+        image: "{{ node_exporter_image }}"
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        pid_mode: host
+        volumes:
+          - "/:/host:ro,rslave"
+        command:
+          - "--path.rootfs=/host"
+          - "--web.listen-address=127.0.0.1:9100"
+
+    # Its built-in healthcheck wgets `localhost`, which can resolve to IPv6 while
+    # cAdvisor listens on IPv4 only, so the container sits permanently unhealthy.
+    # Prometheus verifies it properly via `up`, so the misleading check is removed.
+    - name: Start cAdvisor
+      community.docker.docker_container:
+        name: cadvisor
+        image: "{{ cadvisor_image }}"
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        privileged: true
+        devices:
+          - /dev/kmsg
+        healthcheck:
+          test: ["NONE"]
+        volumes:
+          - "/:/rootfs:ro"
+          - "/var/run:/var/run:ro"
+          - "/sys:/sys:ro"
+          - "/var/lib/docker/:/var/lib/docker:ro"
+          - "/dev/disk/:/dev/disk:ro"
+        command:
+          - "--listen_ip=127.0.0.1"
+          - "--port=8080"
+
+    # Host networking is required for 127.0.0.1 to mean the host's loopback,
+    # where the exporters and both API colours are listening.
+    - name: Start Prometheus
+      community.docker.docker_container:
+        name: prometheus
+        image: "{{ prometheus_image }}"
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        volumes:
+          - /etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+          - /var/lib/prometheus:/prometheus
+        command:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.path=/prometheus"
+          - "--web.listen-address=127.0.0.1:9090"
+
+    - name: Wait for Prometheus to answer
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9090/-/ready
+        status_code: 200
+      register: prom_ready
+      retries: 20
+      delay: 5
+      until: prom_ready.status == 200
+
+    # SMTP credentials and the root_url live in the env file on the server,
+    # never in this repo. Same pattern as /root/taskpluse-api.env.
+    - name: Start Grafana
+      community.docker.docker_container:
+        name: grafana
+        image: "{{ grafana_image }}"
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        env_file: "{{ grafana_env_file }}"
+        volumes:
+          - grafana-data:/var/lib/grafana
+
+    - name: Check every scrape target is up
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9090/api/v1/query?query=up
+        return_content: true
+      register: prom_up
+
+    - name: Show scrape target status
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.metric.job }} ({{ item.metric.instance }}) =
+          {{ 'UP' if item.value[1] == '1' else 'DOWN' }}
+      loop: "{{ prom_up.json.data.result }}"
+      loop_control:
+        label: "{{ item.metric.job }}"
+
+  handlers:
+    # Prometheus re-reads its config on SIGHUP without losing stored metrics;
+    # a restart would leave a gap in the graphs.
+    - name: Reload prometheus
+      ansible.builtin.command: docker kill -s HUP prometheus
+      changed_when: true
