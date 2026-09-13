@@ -1,0 +1,25 @@
+---
+# Moves live traffic to a colour. Callers pass:
+#   switch_to_color, switch_to_port
+#
+# The nginx upstream and the active-colour file are written together and never
+# separately - if they disagree, the next deploy targets the wrong slot.
+
+- name: Point the nginx upstream at {{ switch_to_color }}
+  ansible.builtin.copy:
+    dest: "{{ nginx_upstream_file }}"
+    content: |
+      upstream {{ nginx_upstream_name }} {
+          server 127.0.0.1:{{ switch_to_port }};
+      }
+    mode: "0644"
+  notify: Reload nginx
+
+# Applies the reload now rather than at the end of the play.
+- meta: flush_handlers
+
+- name: Record the new active colour
+  ansible.builtin.copy:
+    dest: "{{ active_color_file }}"
+    content: "{{ switch_to_color }}"
+    mode: "0644"

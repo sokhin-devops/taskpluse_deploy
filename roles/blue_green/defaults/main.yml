@@ -1,0 +1,17 @@
+---
+# Where the currently-live colour is recorded on the server. This file and the
+# nginx upstream below must always change together, or the next deploy computes
+# the wrong idle slot and overwrites the container that is serving traffic.
+active_color_file: /root/taskpluse-active-color
+
+nginx_upstream_file: /etc/nginx/conf.d/taskpluse-active.conf
+nginx_upstream_name: taskpluse_api
+
+blue_port: 8082
+green_port: 8083
+
+container_prefix: taskpluse-api
+
+# Assumed when the active-colour file does not exist yet, i.e. the very first
+# blue-green run on a host that was previously single-container.
+default_color: blue

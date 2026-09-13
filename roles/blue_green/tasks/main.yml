@@ -1,0 +1,33 @@
+---
+# Works out which colour is live and which is idle. Sets, for the caller:
+#   active_color / active_port  - the colour currently serving traffic
+#   other_color  / other_port   - the spare slot (deploy target, or rollback target)
+
+- name: Check whether the active-colour file exists
+  ansible.builtin.stat:
+    path: "{{ active_color_file }}"
+  register: bg_color_stat
+
+- name: Assume the default colour on first run
+  ansible.builtin.set_fact:
+    active_color: "{{ default_color }}"
+  when: not bg_color_stat.stat.exists
+
+# slurp reads the file on the REMOTE host. lookup('file') would read it on the
+# Ansible controller - a different machine, and usually a file that isn't there.
+- name: Read the active colour from the server
+  ansible.builtin.slurp:
+    src: "{{ active_color_file }}"
+  register: bg_color_raw
+  when: bg_color_stat.stat.exists
+
+- name: Set the active colour
+  ansible.builtin.set_fact:
+    active_color: "{{ bg_color_raw.content | b64decode | trim }}"
+  when: bg_color_stat.stat.exists
+
+- name: Work out the other colour and both ports
+  ansible.builtin.set_fact:
+    other_color: "{{ 'green' if active_color == 'blue' else 'blue' }}"
+    other_port: "{{ green_port if active_color == 'blue' else blue_port }}"
+    active_port: "{{ blue_port if active_color == 'blue' else green_port }}"

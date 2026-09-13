@@ -5,36 +5,12 @@
 
   vars:
     image: "registry.sokhin.site/docker-hosted/taskpluse-api:{{ image_tag }}"
-    active_color_file: /root/taskpluse-active-color
+
+  # Sets active_color / active_port and other_color / other_port.
+  roles:
+    - blue_green
 
   tasks:
-
-    - name: Check if active-color file exists
-      ansible.builtin.stat:
-        path: "{{ active_color_file }}"
-      register: active_color_stat
-
-    - name: Default active color to blue (first run)
-      ansible.builtin.set_fact:
-        active_color: blue
-      when: not active_color_stat.stat.exists
-
-    - name: Slurp active color file from the remote host
-      ansible.builtin.slurp:
-        src: "{{ active_color_file }}"
-      register: active_color_raw
-      when: active_color_stat.stat.exists
-
-    - name: Set active color fact from file content
-      ansible.builtin.set_fact:
-        active_color: "{{ active_color_raw.content | b64decode | trim }}"
-      when: active_color_stat.stat.exists
-
-
-    - name: Compute idle color and port
-      ansible.builtin.set_fact:
-        idle_color: "{{ 'green' if active_color == 'blue' else 'blue' }}"
-        idle_port: "{{ 8083 if active_color == 'blue' else 8082 }}"
 
     - name: Pull Docker image
       community.docker.docker_image:
@@ -43,12 +19,14 @@
 
     - name: Remove any stale container in the idle slot
       community.docker.docker_container:
-        name: "taskpluse-api-{{ idle_color }}"
+        name: "{{ container_prefix }}-{{ other_color }}"
         state: absent
 
+    # The live colour is never touched, so it keeps serving every request while
+    # the new version starts and is checked.
     - name: Start new container in the idle slot
       community.docker.docker_container:
-        name: "taskpluse-api-{{ idle_color }}"
+        name: "{{ container_prefix }}-{{ other_color }}"
         image: "{{ image }}"
         state: started
         restart_policy: unless-stopped
@@ -56,46 +34,34 @@
         networks:
           - name: taskpluse-network
         published_ports:
-          - "127.0.0.1:{{ idle_port }}:8082"
+          - "127.0.0.1:{{ other_port }}:8082"
 
     - name: Wait for idle container to accept connections
       ansible.builtin.wait_for:
         host: 127.0.0.1
-        port: "{{ idle_port }}"
+        port: "{{ other_port }}"
         delay: 5
         timeout: 60
 
+    # An open port is not a ready app - Spring Boot binds before the context has
+    # finished loading, so this retries rather than trusting wait_for alone.
     - name: Health-check the idle container before it takes real traffic
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ idle_port }}/actuator/health"
+        url: "http://127.0.0.1:{{ other_port }}/actuator/health"
         status_code: 200
       register: health_check
       retries: 5
       delay: 5
       until: health_check.status == 200
 
-    - name: Point nginx upstream at the newly-verified container
-      ansible.builtin.copy:
-        dest: /etc/nginx/conf.d/taskpluse-active.conf
-        content: |
-          upstream taskpluse_api {
-              server 127.0.0.1:{{ idle_port }};
-          }
-      notify: Reload nginx
-
-    - meta: flush_handlers
-
-    - name: Record new active color
-      ansible.builtin.copy:
-        dest: "{{ active_color_file }}"
-        content: "{{ idle_color }}"
+    - name: Switch traffic to the new container
+      ansible.builtin.include_role:
+        name: blue_green
+        tasks_from: switch
+      vars:
+        switch_to_color: "{{ other_color }}"
+        switch_to_port: "{{ other_port }}"
 
     - name: Show health status
       ansible.builtin.debug:
-        msg: "TaskPluse API ({{ idle_color }}, port {{ idle_port }}) is live and healthy: {{ health_check.json }}"
-
-  handlers:
-    - name: Reload nginx
-      ansible.builtin.systemd:
-        name: nginx
-        state: reloaded
+        msg: "TaskPluse API ({{ other_color }}, port {{ other_port }}) is live and healthy: {{ health_check.json }}"
