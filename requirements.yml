@@ -1,0 +1,11 @@
+---
+# Install with:  ansible-galaxy collection install -r requirements.yml
+#
+# Every playbook here uses community.docker. Without this file a fresh machine
+# fails with "couldn't resolve module/action", which reads like a typo rather
+# than a missing dependency.
+collections:
+  - name: community.docker
+    # Allow patch and minor updates, block the next major version - collections
+    # follow semver, so 6.x is where breaking changes are allowed to land.
+    version: ">=5.0.0,<6.0.0"
