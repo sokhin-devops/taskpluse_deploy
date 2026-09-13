@@ -1,0 +1,85 @@
+name: taskpluse-elk
+
+services:
+
+  elasticsearch:
+    # Without container_name, Compose would call this taskpluse-elk-elasticsearch-1
+    # and filebeat.yml's autodiscover exclusions - which match on container name -
+    # would stop matching, so the stack would start logging itself in a loop.
+    container_name: elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION}
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms${ES_HEAP} -Xmx${ES_HEAP}"
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Elasticsearch takes ~30s to start; failures before this don't count
+      # against the retry budget.
+      start_period: 30s
+
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:${ELK_VERSION}
+    restart: unless-stopped
+    # Encryption keys and the public base URL. Lives on the server, never in git.
+    env_file:
+      - /root/kibana.env
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  logstash:
+    container_name: logstash
+    image: docker.elastic.co/logstash/logstash:${ELK_VERSION}
+    restart: unless-stopped
+    environment:
+      LS_JAVA_OPTS: "-Xms${LOGSTASH_HEAP} -Xmx${LOGSTASH_HEAP}"
+      XPACK_MONITORING_ENABLED: "false"
+    ports:
+      - "127.0.0.1:5044:5044"
+    volumes:
+      - /etc/logstash/pipeline:/usr/share/logstash/pipeline:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  filebeat:
+    container_name: filebeat
+    image: docker.elastic.co/beats/filebeat:${ELK_VERSION}
+    restart: unless-stopped
+    # Docker's container log files are root-owned; the default filebeat user
+    # reads nothing and fails silently.
+    user: root
+    volumes:
+      - /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log/nginx:/var/log/nginx:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat-data:/usr/share/filebeat/data
+    depends_on:
+      - logstash
+
+# external: true means "this already exists, use it, don't create it". Without
+# it Compose would create new prefixed volumes and every indexed log would be
+# invisible - the data would still be on disk, just not mounted anywhere.
+volumes:
+  elasticsearch-data:
+    external: true
+  filebeat-data:
+    external: true
+
+networks:
+  default:
+    name: elk-network
+    external: true

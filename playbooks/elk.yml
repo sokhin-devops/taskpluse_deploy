@@ -1,15 +1,14 @@
 ---
+# Ansible owns the host - kernel settings, config files, delivering the stack
+# definition. Compose owns the container stack itself.
 - name: Deploy the ELK logging stack
   hosts: production
   become: true
 
   vars:
-    elk_version: "8.15.0"
     elk_network: elk-network
-    es_heap: "1g"
-    logstash_heap: "512m"
+    compose_dir: /opt/taskpluse-elk
     log_retention_days: 14
-    kibana_env_file: /root/kibana.env
 
   tasks:
 
@@ -27,12 +26,13 @@
       when: sysctl_file.changed
       changed_when: true
 
+    # Declared external in docker-compose.yml, so it has to exist first.
     - name: Create the ELK docker network
       community.docker.docker_network:
         name: "{{ elk_network }}"
         state: present
 
-    - name: Ensure config directories exist
+    - name: Ensure directories exist
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
@@ -40,6 +40,7 @@
       loop:
         - /etc/logstash/pipeline
         - /etc/filebeat
+        - "{{ compose_dir }}"
 
     - name: Copy the Logstash pipeline
       ansible.builtin.copy:
@@ -58,22 +59,19 @@
         group: root
       notify: Restart filebeat
 
-    - name: Start Elasticsearch
-      community.docker.docker_container:
-        name: elasticsearch
-        image: "docker.elastic.co/elasticsearch/elasticsearch:{{ elk_version }}"
-        state: started
-        restart_policy: unless-stopped
-        networks:
-          - name: "{{ elk_network }}"
-        published_ports:
-          - "127.0.0.1:9200:9200"
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: "false"
-          ES_JAVA_OPTS: "-Xms{{ es_heap }} -Xmx{{ es_heap }}"
-        volumes:
-          - elasticsearch-data:/usr/share/elasticsearch/data
+    - name: Copy the compose stack definition
+      ansible.builtin.copy:
+        src: "../files/elk/{{ item }}"
+        dest: "{{ compose_dir }}/{{ item }}"
+        mode: "0644"
+      loop:
+        - docker-compose.yml
+        - .env
+
+    - name: Bring up the ELK stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: present
 
     - name: Wait for Elasticsearch to answer
       ansible.builtin.uri:
@@ -83,52 +81,6 @@
       retries: 30
       delay: 5
       until: es_health.status == 200
-
-    - name: Start Kibana
-      community.docker.docker_container:
-        name: kibana
-        image: "docker.elastic.co/kibana/kibana:{{ elk_version }}"
-        state: started
-        restart_policy: unless-stopped
-        networks:
-          - name: "{{ elk_network }}"
-        published_ports:
-          - "127.0.0.1:5601:5601"
-        env_file: "{{ kibana_env_file }}"
-
-    - name: Start Logstash
-      community.docker.docker_container:
-        name: logstash
-        image: "docker.elastic.co/logstash/logstash:{{ elk_version }}"
-        state: started
-        restart_policy: unless-stopped
-        networks:
-          - name: "{{ elk_network }}"
-        published_ports:
-          - "127.0.0.1:5044:5044"
-        env:
-          LS_JAVA_OPTS: "-Xms{{ logstash_heap }} -Xmx{{ logstash_heap }}"
-          XPACK_MONITORING_ENABLED: "false"
-        volumes:
-          - /etc/logstash/pipeline:/usr/share/logstash/pipeline:ro
-
-    # Runs as root because Docker's container log files are root-owned;
-    # the default filebeat user reads nothing and fails silently.
-    - name: Start Filebeat
-      community.docker.docker_container:
-        name: filebeat
-        image: "docker.elastic.co/beats/filebeat:{{ elk_version }}"
-        state: started
-        restart_policy: unless-stopped
-        user: root
-        networks:
-          - name: "{{ elk_network }}"
-        volumes:
-          - /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-          - /var/lib/docker/containers:/var/lib/docker/containers:ro
-          - /var/log/nginx:/var/log/nginx:ro
-          - /var/run/docker.sock:/var/run/docker.sock:ro
-          - filebeat-data:/usr/share/filebeat/data
 
     - name: Install the log retention policy
       ansible.builtin.uri:
@@ -198,13 +150,15 @@
 
   handlers:
     - name: Restart logstash
-      community.docker.docker_container:
-        name: logstash
-        state: started
-        restart: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: restarted
+        services:
+          - logstash
 
     - name: Restart filebeat
-      community.docker.docker_container:
-        name: filebeat
-        state: started
-        restart: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ compose_dir }}"
+        state: restarted
+        services:
+          - filebeat
