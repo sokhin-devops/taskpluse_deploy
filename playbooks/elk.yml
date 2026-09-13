@@ -162,6 +162,40 @@
               number_of_replicas: 0
         status_code: 200
 
+    - name: Wait for Kibana to be ready
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5601/api/status
+        status_code: 200
+      register: kibana_status
+      retries: 30
+      delay: 10
+      until: kibana_status.status == 200
+
+    # `filename` is resolved on the Ansible controller, not the target host, so
+    # this points at the repo copy rather than a path on the VM.
+    #
+    # The import API cannot distinguish "created" from "overwrote with identical
+    # content", so it would report changed on every run. Reporting false keeps
+    # `changed=0` meaningful as a drift signal for the rest of the playbook.
+    - name: Import the Kibana saved objects
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:5601/api/saved_objects/_import?overwrite=true"
+        method: POST
+        headers:
+          kbn-xsrf: "true"
+        body_format: form-multipart
+        body:
+          file:
+            filename: "{{ playbook_dir }}/../files/kibana/kibana-saved-objects.ndjson"
+            mime_type: application/ndjson
+        status_code: 200
+      register: kibana_import
+      changed_when: false
+
+    - name: Show what was imported
+      ansible.builtin.debug:
+        msg: "Imported {{ kibana_import.json.successCount }} Kibana saved objects (success: {{ kibana_import.json.success }})"
+
   handlers:
     - name: Restart logstash
       community.docker.docker_container:
