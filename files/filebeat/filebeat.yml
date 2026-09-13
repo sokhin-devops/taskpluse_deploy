@@ -1,0 +1,57 @@
+filebeat.inputs:
+  - type: filestream
+    id: nginx-access
+    paths:
+      - /var/log/nginx/access.log
+    fields:
+      log_source: nginx-access
+    fields_under_root: true
+
+  - type: filestream
+    id: nginx-error
+    paths:
+      - /var/log/nginx/error.log
+    fields:
+      log_source: nginx-error
+    fields_under_root: true
+
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      templates:
+        - condition:
+            contains:
+              docker.container.name: "taskpluse-api"
+          config:
+            - type: container
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              multiline.type: pattern
+              multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+              multiline.negate: true
+              multiline.match: after
+
+        - condition:
+            not:
+              or:
+                - contains:
+                    docker.container.name: "taskpluse-api"
+                - contains:
+                    docker.container.name: "elasticsearch"
+                - contains:
+                    docker.container.name: "logstash"
+                - contains:
+                    docker.container.name: "kibana"
+                - contains:
+                    docker.container.name: "filebeat"
+          config:
+            - type: container
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+
+processors:
+  - add_docker_metadata:
+      host: "unix:///var/run/docker.sock"
+
+output.logstash:
+  hosts: ["logstash:5044"]

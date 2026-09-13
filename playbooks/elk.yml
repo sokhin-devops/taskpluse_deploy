@@ -1,0 +1,176 @@
+---
+- name: Deploy the ELK logging stack
+  hosts: production
+  become: true
+
+  vars:
+    elk_version: "8.15.0"
+    elk_network: elk-network
+    es_heap: "1g"
+    logstash_heap: "512m"
+    log_retention_days: 14
+    kibana_env_file: /root/kibana.env
+
+  tasks:
+
+    # Elasticsearch runs a bootstrap check on this and refuses to start if it
+    # is too low. The file makes it survive a reboot; the command applies it now.
+    - name: Persist vm.max_map_count for Elasticsearch
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-elasticsearch.conf
+        content: "vm.max_map_count=262144\n"
+        mode: "0644"
+      register: sysctl_file
+
+    - name: Apply vm.max_map_count immediately
+      ansible.builtin.command: sysctl -w vm.max_map_count=262144
+      when: sysctl_file.changed
+      changed_when: true
+
+    - name: Create the ELK docker network
+      community.docker.docker_network:
+        name: "{{ elk_network }}"
+        state: present
+
+    - name: Ensure config directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /etc/logstash/pipeline
+        - /etc/filebeat
+
+    - name: Copy the Logstash pipeline
+      ansible.builtin.copy:
+        src: ../files/logstash/logstash.conf
+        dest: /etc/logstash/pipeline/logstash.conf
+        mode: "0644"
+      notify: Restart logstash
+
+    # Filebeat refuses to start if this file is group- or world-writable.
+    - name: Copy the Filebeat config
+      ansible.builtin.copy:
+        src: ../files/filebeat/filebeat.yml
+        dest: /etc/filebeat/filebeat.yml
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Restart filebeat
+
+    - name: Start Elasticsearch
+      community.docker.docker_container:
+        name: elasticsearch
+        image: "docker.elastic.co/elasticsearch/elasticsearch:{{ elk_version }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ elk_network }}"
+        published_ports:
+          - "127.0.0.1:9200:9200"
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: "-Xms{{ es_heap }} -Xmx{{ es_heap }}"
+        volumes:
+          - elasticsearch-data:/usr/share/elasticsearch/data
+
+    - name: Wait for Elasticsearch to answer
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9200/_cluster/health
+        status_code: 200
+      register: es_health
+      retries: 30
+      delay: 5
+      until: es_health.status == 200
+
+    - name: Start Kibana
+      community.docker.docker_container:
+        name: kibana
+        image: "docker.elastic.co/kibana/kibana:{{ elk_version }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ elk_network }}"
+        published_ports:
+          - "127.0.0.1:5601:5601"
+        env_file: "{{ kibana_env_file }}"
+
+    - name: Start Logstash
+      community.docker.docker_container:
+        name: logstash
+        image: "docker.elastic.co/logstash/logstash:{{ elk_version }}"
+        state: started
+        restart_policy: unless-stopped
+        networks:
+          - name: "{{ elk_network }}"
+        published_ports:
+          - "127.0.0.1:5044:5044"
+        env:
+          LS_JAVA_OPTS: "-Xms{{ logstash_heap }} -Xmx{{ logstash_heap }}"
+          XPACK_MONITORING_ENABLED: "false"
+        volumes:
+          - /etc/logstash/pipeline:/usr/share/logstash/pipeline:ro
+
+    # Runs as root because Docker's container log files are root-owned;
+    # the default filebeat user reads nothing and fails silently.
+    - name: Start Filebeat
+      community.docker.docker_container:
+        name: filebeat
+        image: "docker.elastic.co/beats/filebeat:{{ elk_version }}"
+        state: started
+        restart_policy: unless-stopped
+        user: root
+        networks:
+          - name: "{{ elk_network }}"
+        volumes:
+          - /etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+          - /var/lib/docker/containers:/var/lib/docker/containers:ro
+          - /var/log/nginx:/var/log/nginx:ro
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+          - filebeat-data:/usr/share/filebeat/data
+
+    - name: Install the log retention policy
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9200/_ilm/policy/taskpluse-logs-policy
+        method: PUT
+        body_format: json
+        body:
+          policy:
+            phases:
+              hot:
+                actions: {}
+              delete:
+                min_age: "{{ log_retention_days }}d"
+                actions:
+                  delete: {}
+        status_code: 200
+
+    # priority 200 beats the default template Logstash installs.
+    - name: Install the index template
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9200/_index_template/taskpluse-logs-template
+        method: PUT
+        body_format: json
+        body:
+          index_patterns:
+            - "taskpluse-*"
+          priority: 200
+          template:
+            settings:
+              index.lifecycle.name: taskpluse-logs-policy
+              number_of_replicas: 0
+        status_code: 200
+
+  handlers:
+    - name: Restart logstash
+      community.docker.docker_container:
+        name: logstash
+        state: started
+        restart: true
+
+    - name: Restart filebeat
+      community.docker.docker_container:
+        name: filebeat
+        state: started
+        restart: true
