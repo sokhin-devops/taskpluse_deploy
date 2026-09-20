@@ -26,7 +26,10 @@ pipeline {
     steps {
         copyArtifacts(
             projectName: 'taskpluse-web-ci',
-            selector: specific("${params.CI_BUILD_NUMBER}"),
+            selector: upstream(
+                includeUpstreamParameters: true,
+                upstreamFilterStrategy: 'Use global setting'
+            ),
             filter: 'dist/taskpulse_web/browser/**',
             fingerprintArtifacts: true
         )
