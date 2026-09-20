@@ -23,15 +23,15 @@ pipeline {
         }
 
         stage('Download Web Artifact') {
-            steps {
-                copyArtifacts(
-                    projectName: 'taskpluse-web-ci',
-                    selector: specific("${params.CI_BUILD_NUMBER}"),
-                    filter: 'dist/taskpulse_web/browser/**',
-                    fingerprintArtifacts: true
-                )
-            }
-        }
+    steps {
+        copyArtifacts(
+            projectName: 'taskpluse-web-ci',
+            selector: specific("${params.CI_BUILD_NUMBER}"),
+            filter: 'dist/taskpulse_web/browser/**',
+            fingerprintArtifacts: true
+        )
+    }
+}
 
         stage('Verify Artifact') {
             steps {
