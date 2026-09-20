@@ -3,7 +3,6 @@ pipeline {
     agent any
 
     parameters {
-
         string(
             name: 'RELEASE_VERSION',
             description: 'Web release version from CI'
@@ -30,7 +29,6 @@ pipeline {
 
         stage('Download Web Artifact') {
             steps {
-
                 copyArtifacts(
                     projectName: 'taskpluse-web-ci',
 
