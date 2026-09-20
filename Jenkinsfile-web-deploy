@@ -23,18 +23,18 @@ pipeline {
         }
 
         stage('Download Web Artifact') {
-            steps {
-                copyArtifacts(
-                    projectName: 'taskpluse-web-ci',
-                    selector: upstream(
-                        includeUpstreamParameters: true,
-                        upstreamFilterStrategy: 'Use global setting'
-                    ),
-                    filter: 'dist/taskpulse_web/browser/**',
-                    fingerprintArtifacts: true
-                )
-            }
-        }
+    steps {
+        copyArtifacts(
+            projectName: 'taskpluse-web-ci',
+            selector: upstream(
+                includeUpstreamParameters: true,
+                upstreamFilterStrategy: 'Use global setting'
+            ),
+            filter: 'dist/taskpulse_web/browser/**',
+            fingerprintArtifacts: true
+        )
+    }
+}
 
         stage('Verify Artifact') {
             steps {
