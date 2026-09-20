@@ -1,3 +1,4 @@
+```groovy
 pipeline {
     agent any
 
@@ -33,8 +34,9 @@ pipeline {
                 copyArtifacts(
                     projectName: 'taskpluse-web-ci',
 
-                    selector: specific(
-                        params.CI_BUILD_NUMBER
+                    selector: upstream(
+                        includeUpstreamParameters: true,
+                        upstreamFilterStrategy: 'Use global setting'
                     ),
 
                     filter: 'dist/taskpulse_web/browser/**',
@@ -106,6 +108,7 @@ pipeline {
             echo "======================================"
             echo "TaskPluse Web Deploy SUCCESS"
             echo "Release : ${params.RELEASE_VERSION}"
+            echo "CI Build: ${params.CI_BUILD_NUMBER}"
             echo "======================================"
         }
 
@@ -116,3 +119,4 @@ pipeline {
         }
     }
 }
+```
