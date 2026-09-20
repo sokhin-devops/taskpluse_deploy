@@ -1,0 +1,59 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'RELEASE_VERSION',
+            description: 'Web release version'
+        )
+
+        string(
+            name: 'CI_BUILD_NUMBER',
+            description: 'CI build number'
+        )
+    }
+
+    stages {
+
+        stage('Show Parameters') {
+            steps {
+                echo "Release version: ${params.RELEASE_VERSION}"
+                echo "CI build number: ${params.CI_BUILD_NUMBER}"
+            }
+        }
+
+        stage('Download Web Artifact') {
+            steps {
+                copyArtifacts(
+                    projectName: 'taskpluse-web-ci',
+                    selector: specific("${params.CI_BUILD_NUMBER}"),
+                    filter: 'dist/taskpulse_web/browser/**',
+                    fingerprintArtifacts: true
+                )
+            }
+        }
+
+        stage('Verify Artifact') {
+            steps {
+                sh '''
+                    echo "Downloaded artifact:"
+                    find dist/taskpulse_web/browser -maxdepth 2 -type f | sort
+
+                    echo ""
+                    echo "Checking index.html..."
+                    test -f dist/taskpulse_web/browser/index.html
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "TaskPluse Web artifact ${params.RELEASE_VERSION} downloaded successfully."
+        }
+
+        failure {
+            echo "TaskPluse Web Deploy failed."
+        }
+    }
+}

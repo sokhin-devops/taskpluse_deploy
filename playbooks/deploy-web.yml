@@ -1,0 +1,76 @@
+---
+- name: Deploy TaskPluse Web
+  hosts: production
+  become: true
+
+  vars:
+    app_name: taskpluse-web
+
+    deploy_root: /var/www/taskpluse-web
+    releases_dir: "{{ deploy_root }}/releases"
+    current_link: "{{ deploy_root }}/current"
+
+    release_version: "{{ release_version | default('manual') }}"
+    release_dir: "{{ releases_dir }}/{{ release_version }}"
+
+    local_build_dir: "{{ playbook_dir }}/../../taskpluse_web/dist/taskpulse_web/browser"
+
+  tasks:
+
+    - name: Create deployment root
+      ansible.builtin.file:
+        path: "{{ deploy_root }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0755"
+
+    - name: Create releases directory
+      ansible.builtin.file:
+        path: "{{ releases_dir }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0755"
+
+    - name: Create release directory
+      ansible.builtin.file:
+        path: "{{ release_dir }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: "0755"
+
+    - name: Copy Angular build
+      ansible.builtin.copy:
+        src: "{{ local_build_dir }}/"
+        dest: "{{ release_dir }}/"
+        owner: www-data
+        group: www-data
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Update current release symlink
+      ansible.builtin.file:
+        src: "{{ release_dir }}"
+        dest: "{{ current_link }}"
+        state: link
+        force: true
+
+    - name: Validate NGINX configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      changed_when: false
+
+    - name: Reload NGINX
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Show deployment information
+      ansible.builtin.debug:
+        msg:
+          - "Application: {{ app_name }}"
+          - "Release: {{ release_version }}"
+          - "Release directory: {{ release_dir }}"
+          - "Current: {{ current_link }}"

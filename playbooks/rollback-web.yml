@@ -1,0 +1,48 @@
+---
+- name: Rollback TaskPluse Web
+  hosts: production
+  become: true
+
+  vars:
+    app_name: taskpluse-web
+    deploy_root: /var/www/taskpluse-web
+    releases_dir: "{{ deploy_root }}/releases"
+    current_link: "{{ deploy_root }}/current"
+
+    rollback_version: "{{ rollback_version }}"
+
+  tasks:
+
+    - name: Check release exists
+      ansible.builtin.stat:
+        path: "{{ releases_dir }}/{{ rollback_version }}"
+      register: release
+
+    - name: Stop if release does not exist
+      ansible.builtin.fail:
+        msg: "Release {{ rollback_version }} does not exist"
+      when: not release.stat.exists
+
+    - name: Switch current release
+      ansible.builtin.file:
+        src: "{{ releases_dir }}/{{ rollback_version }}"
+        dest: "{{ current_link }}"
+        state: link
+        force: true
+
+    - name: Validate NGINX configuration
+      ansible.builtin.command:
+        cmd: nginx -t
+      changed_when: false
+
+    - name: Reload NGINX
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Show rollback information
+      ansible.builtin.debug:
+        msg:
+          - "Application: {{ app_name }}"
+          - "Rolled back to release: {{ rollback_version }}"
+          - "Current: {{ current_link }}"
