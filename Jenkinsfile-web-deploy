@@ -2,14 +2,15 @@ pipeline {
     agent any
 
     parameters {
+
         string(
             name: 'RELEASE_VERSION',
-            description: 'Web release version'
+            description: 'Web release version from CI'
         )
 
         string(
             name: 'CI_BUILD_NUMBER',
-            description: 'CI build number'
+            description: 'Source CI build number'
         )
     }
 
@@ -17,46 +18,101 @@ pipeline {
 
         stage('Show Parameters') {
             steps {
-                echo "Release version: ${params.RELEASE_VERSION}"
-                echo "CI build number: ${params.CI_BUILD_NUMBER}"
+                echo "======================================"
+                echo "TaskPluse Web Deploy"
+                echo "======================================"
+
+                echo "Release Version : ${params.RELEASE_VERSION}"
+                echo "CI Build Number : ${params.CI_BUILD_NUMBER}"
             }
         }
 
         stage('Download Web Artifact') {
-    steps {
-        copyArtifacts(
-            projectName: 'taskpluse-web-ci',
-            selector: upstream(
-                includeUpstreamParameters: true,
-                upstreamFilterStrategy: 'Use global setting'
-            ),
-            filter: 'dist/taskpulse_web/browser/**',
-            fingerprintArtifacts: true
-        )
-    }
-}
+            steps {
+
+                copyArtifacts(
+                    projectName: 'taskpluse-web-ci',
+
+                    selector: specific(
+                        params.CI_BUILD_NUMBER
+                    ),
+
+                    filter: 'dist/taskpulse_web/browser/**',
+
+                    fingerprintArtifacts: true
+                )
+            }
+        }
 
         stage('Verify Artifact') {
             steps {
                 sh '''
-                    echo "Downloaded artifact:"
-                    find dist/taskpulse_web/browser -maxdepth 2 -type f | sort
+                    echo "======================================"
+                    echo "Downloaded Web Artifact"
+                    echo "======================================"
+
+                    echo ""
+                    echo "Files:"
+                    find dist/taskpulse_web/browser \
+                        -maxdepth 2 \
+                        -type f \
+                        | sort
 
                     echo ""
                     echo "Checking index.html..."
+
                     test -f dist/taskpulse_web/browser/index.html
+
+                    echo ""
+                    echo "Artifact verification SUCCESS."
+                '''
+            }
+        }
+
+        stage('Deploy Web with Ansible') {
+            steps {
+                sh '''
+                    echo "======================================"
+                    echo "Deploying TaskPluse Web"
+                    echo "======================================"
+
+                    ansible-playbook \
+                        -i inventory/hosts.ini \
+                        playbooks/deploy-web.yml \
+                        -e "release_version=${RELEASE_VERSION}"
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                    echo "======================================"
+                    echo "Deployment Verification"
+                    echo "======================================"
+
+                    ansible production \
+                        -i inventory/hosts.ini \
+                        -m shell \
+                        -a "readlink -f /var/www/taskpluse-web/current"
                 '''
             }
         }
     }
 
     post {
+
         success {
-            echo "TaskPluse Web artifact ${params.RELEASE_VERSION} downloaded successfully."
+            echo "======================================"
+            echo "TaskPluse Web Deploy SUCCESS"
+            echo "Release : ${params.RELEASE_VERSION}"
+            echo "======================================"
         }
 
         failure {
-            echo "TaskPluse Web Deploy failed."
+            echo "======================================"
+            echo "TaskPluse Web Deploy FAILED"
+            echo "======================================"
         }
     }
 }
