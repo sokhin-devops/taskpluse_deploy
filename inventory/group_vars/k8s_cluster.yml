@@ -1,0 +1,4 @@
+---
+# Kubernetes nodes forward traffic between pods, so UFW must not drop routed
+# packets the way it does on an ordinary server.
+ufw_routed_policy: allow

@@ -1,0 +1,68 @@
+---
+# First contact with fresh VMs: creates the admin user every other playbook logs
+# in as. A new Vultr image has only root, so this is the one playbook that
+# connects as root.
+#
+# Root login stays ON here. setup-server.yml switches it off, and only after the
+# second play below has proved the admin user can log in and use sudo - so a
+# mistake in this file can never lock you out.
+#
+# Safe to re-run: once root login is off, the first play can't connect and is
+# skipped, and the second play still checks the admin user.
+
+- name: Create the admin user
+  hosts: all
+  gather_facts: false
+  # Once setup-server.yml has disabled root login, root can't connect any more.
+  # That's expected on a re-run, not an error.
+  ignore_unreachable: true
+  vars:
+    ansible_user: root
+
+  tasks:
+
+    # "*" means "no password exists" rather than "account locked", so SSH key
+    # login works and password login is impossible.
+    - name: Create the admin user
+      ansible.builtin.user:
+        name: "{{ admin_user }}"
+        shell: /bin/bash
+        groups: [sudo]
+        append: true
+        password: "*"
+
+    # exclusive: this key is the only way in. Any other key added by hand would
+    # be removed on the next run.
+    - name: Install the admin SSH key
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        key: "{{ lookup('ansible.builtin.file', admin_ssh_public_key_file | expanduser) }}"
+        exclusive: true
+
+    # The account has no password, so sudo can't ask for one. validate runs
+    # visudo on the new file first: a broken sudoers file would remove sudo for
+    # everyone, root SSH included once that's off.
+    - name: Allow the admin user to use sudo without a password
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/90-{{ admin_user }}"
+        content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
+- name: Prove the admin user can log in and use sudo
+  hosts: all
+  gather_facts: false
+  become: true
+
+  tasks:
+
+    - name: Log in as the admin user and become root
+      ansible.builtin.command: whoami
+      register: whoami
+      changed_when: false
+
+    - name: Check sudo really gave root
+      ansible.builtin.assert:
+        that: whoami.stdout == "root"
+        fail_msg: "{{ admin_user }} logged in but sudo gave '{{ whoami.stdout }}', not root"
+        success_msg: "{{ admin_user }} logs in with the key and has full sudo"

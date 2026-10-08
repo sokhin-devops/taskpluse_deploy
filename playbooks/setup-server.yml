@@ -1,0 +1,13 @@
+---
+# Brings every server to the same hardened baseline: updates, automatic security
+# updates, the UFW firewall, and SSH with root and password login switched off.
+#
+# Run playbooks/bootstrap.yml first on fresh VMs - this one logs in as the admin
+# user it creates. Safe to re-run.
+- name: Harden and prepare every server
+  hosts: all
+  become: true
+
+  roles:
+    - common
+    - security

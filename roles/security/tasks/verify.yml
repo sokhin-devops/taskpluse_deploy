@@ -1,0 +1,47 @@
+---
+# Plain ssh from your machine, outside Ansible's own connection - the way you'd
+# log in by hand. BatchMode means no prompts, so a key problem fails at once
+# instead of waiting for a password that doesn't exist.
+
+- name: Confirm the admin user still logs in with the key
+  ansible.builtin.command: >-
+    ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
+    -o IdentitiesOnly=yes -i {{ ansible_ssh_private_key_file }}
+    {{ admin_user }}@{{ hostvars[inventory_hostname].ansible_host }} true
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Confirm root is refused
+  ansible.builtin.command: >-
+    ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new
+    -o IdentitiesOnly=yes -i {{ ansible_ssh_private_key_file }}
+    root@{{ hostvars[inventory_hostname].ansible_host }} true
+  delegate_to: localhost
+  become: false
+  register: root_login
+  changed_when: false
+  failed_when: root_login.rc == 0 or 'Permission denied' not in root_login.stderr
+
+- name: Read the saved policy for forwarded traffic
+  ansible.builtin.command: grep -E '^DEFAULT_FORWARD_POLICY=' /etc/default/ufw
+  register: forward_policy
+  changed_when: false
+
+- name: Check the forwarding policy was saved
+  ansible.builtin.assert:
+    that: forward_policy.stdout == expected
+    fail_msg: "Expected {{ expected }}, found {{ forward_policy.stdout }}"
+    success_msg: "{{ forward_policy.stdout }}"
+  vars:
+    expected: >-
+      DEFAULT_FORWARD_POLICY="{{ {'allow': 'ACCEPT', 'deny': 'DROP', 'reject': 'REJECT'}[ufw_routed_policy] }}"
+
+- name: Read the firewall as the server sees it
+  ansible.builtin.command: ufw status verbose
+  register: ufw_status
+  changed_when: false
+
+- name: Show the firewall
+  ansible.builtin.debug:
+    var: ufw_status.stdout_lines

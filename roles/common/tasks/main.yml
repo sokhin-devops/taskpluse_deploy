@@ -1,0 +1,36 @@
+---
+# dist, not safe: a new kernel arrives as a new package, which a plain upgrade
+# holds back. Packages pinned with `apt-mark hold` (Kubernetes, later) are still
+# left alone.
+- name: Apply all pending updates
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    upgrade: dist
+
+- name: Install base tools
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+# Ubuntu's default unattended-upgrades only installs from the security pocket,
+# so third-party repositories (Kubernetes, Docker) are never upgraded behind
+# your back. This file just makes sure the daily run is switched on.
+- name: Keep automatic security updates on
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    mode: "0644"
+
+- name: Check whether the updates need a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: reboot_required
+
+# Waits for the server to come back before the play continues.
+- name: Reboot to load the new kernel
+  ansible.builtin.reboot:
+    msg: "Rebooting after package updates (Ansible setup-server.yml)"
+  when: reboot_required.stat.exists

@@ -1,0 +1,9 @@
+---
+# Small tools needed by later roles (adding package repositories, reading JSON)
+# or by a person debugging on the box. Anything role-specific belongs in that role.
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - jq
+  - unattended-upgrades

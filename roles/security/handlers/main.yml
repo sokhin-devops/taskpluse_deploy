@@ -1,0 +1,7 @@
+---
+# reload, not restart: sshd re-reads its config and the SSH session Ansible is
+# using right now stays open.
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded

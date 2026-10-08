@@ -1,0 +1,4 @@
+---
+# HTTP and HTTPS for the ingress controller. Vultr's firewall limits these to
+# Cloudflare and your IP.
+ufw_extra_tcp_ports: [80, 443]

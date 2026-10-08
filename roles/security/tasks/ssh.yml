@@ -1,0 +1,43 @@
+---
+# sshd keeps the FIRST value it reads for a setting, and reads sshd_config.d/
+# in name order before the main file. 00- sorts ahead of the image's own files
+# (cloud-init's 50-cloud-init.conf can switch password login back on), so these win.
+- name: Harden SSH, or take the change back if it breaks the config
+  block:
+
+    - name: Write the SSH settings
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-taskpluse.conf
+        content: |
+          # Managed by Ansible (roles/security). Local edits are overwritten.
+          PermitRootLogin no
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PubkeyAuthentication yes
+          AllowUsers {{ admin_user }}
+          MaxAuthTries 3
+          X11Forwarding no
+        mode: "0644"
+      notify: Reload sshd
+
+    # Reads the whole configuration, drop-ins included, without touching the
+    # running server. A bad file is caught here instead of at the next reboot,
+    # when sshd would refuse to start and the only way back is Vultr's console.
+    - name: Test the complete SSH configuration
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+
+  rescue:
+
+    - name: Remove the settings that failed the test
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/00-taskpluse.conf
+        state: absent
+
+    - name: Stop - sshd is still running on its previous settings
+      ansible.builtin.fail:
+        msg: "sshd -t rejected the new settings. They were removed and sshd was not reloaded."
+
+# Apply now, not at the end of the play, so verify.yml tests the real result.
+- name: Apply the new SSH settings
+  ansible.builtin.meta: flush_handlers

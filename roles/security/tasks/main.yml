@@ -1,0 +1,11 @@
+---
+# Firewall first, SSH second, proof last. Each step leaves SSH working, and the
+# last one checks that from your machine rather than trusting "ok".
+- name: Configure the UFW firewall
+  ansible.builtin.import_tasks: ufw.yml
+
+- name: Harden the SSH server
+  ansible.builtin.import_tasks: ssh.yml
+
+- name: Prove access still works the way it should
+  ansible.builtin.import_tasks: verify.yml

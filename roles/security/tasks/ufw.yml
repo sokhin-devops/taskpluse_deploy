@@ -1,0 +1,42 @@
+---
+# Every allow rule goes in before the firewall is switched on, SSH first - so
+# turning UFW on can never cut the connection Ansible is using.
+
+- name: Allow SSH and this server's public ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+    comment: taskpluse public
+  loop: "{{ ufw_allowed_tcp_ports + ufw_extra_tcp_ports }}"
+
+# Kubernetes, Jenkins -> Nexus and the API -> PostgreSQL all talk over the
+# private network; none of those ports is open on the public side.
+- name: Trust everything from the private network
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ private_network_cidr }}"
+    comment: taskpluse private network
+
+- name: Block all other incoming traffic
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Allow all outgoing traffic
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+# Saved to /etc/default/ufw, but `ufw status` keeps printing "disabled (routed)"
+# until the kernel forwards packets (net.ipv4.ip_forward=1, which the Kubernetes
+# setup turns on). The module judges "changed" from that status text, so it
+# reports ok either way - verify.yml reads the saved value instead.
+- name: Set the policy for forwarded traffic
+  community.general.ufw:
+    default: "{{ ufw_routed_policy }}"
+    direction: routed
+
+- name: Switch the firewall on
+  community.general.ufw:
+    state: enabled

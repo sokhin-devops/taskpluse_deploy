@@ -1,0 +1,18 @@
+---
+# Two firewall layers, each enough on its own:
+#   Vultr firewall - in front of the VM, narrows SSH/6443/80/443 to your IP or Cloudflare
+#   UFW (here)     - on the VM, decides which ports exist at all
+# SSH is open to "anywhere" at the UFW layer on purpose: Vultr already restricts
+# it to your IP, and pinning UFW to your IP too would lock you out the day your
+# home IP changes - Vultr's rule is fixed by re-running provision-vultr.yml,
+# UFW's would need the SSH access it just took away.
+ufw_allowed_tcp_ports: [22]
+
+# Extra public ports per server group - see inventory/group_vars/<group>.yml.
+ufw_extra_tcp_ports: []
+
+# Ordinary servers don't forward traffic. Kubernetes nodes override this to allow.
+ufw_routed_policy: deny
+
+# No fail2ban: it bans IPs that keep failing SSH logins, but Vultr's firewall
+# already drops SSH from every IP except yours, so there is nothing for it to see.

@@ -1,0 +1,3 @@
+---
+# Kubernetes API, for kubectl from your machine. Vultr's firewall limits it to your IP.
+ufw_extra_tcp_ports: [6443]
