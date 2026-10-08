@@ -1,0 +1,5 @@
+# Phase 6 learning: the folder everything else lives in. Deleting it deletes all of it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: learn

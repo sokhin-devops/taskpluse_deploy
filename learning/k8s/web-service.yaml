@@ -1,0 +1,16 @@
+# Phase 6 learning: the file version of `kubectl expose deployment web --port=80`.
+# One stable address (ClusterIP + DNS name "web") in front of Pods whose IPs change.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: learn
+spec:
+  type: ClusterIP
+  # Sends traffic to every Ready Pod carrying this label - the same label the
+  # Deployment puts on its Pods.
+  selector:
+    app: web
+  ports:
+    - port: 80          # the port the Service listens on
+      targetPort: 80    # the container's port

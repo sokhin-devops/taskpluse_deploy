@@ -1,0 +1,22 @@
+# Phase 6 learning: a rule for the ingress controller (Traefik).
+# "A request for learn.sokhin.site, any path -> Service web, port 80."
+# The Ingress itself runs nothing; Traefik reads it and routes accordingly.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: learn
+spec:
+  ingressClassName: traefik
+  rules:
+    # Routing is by the Host header, so many sites can share the same IP and port.
+    - host: learn.sokhin.site
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port:
+                  number: 80

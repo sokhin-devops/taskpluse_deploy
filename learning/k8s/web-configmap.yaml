@@ -1,0 +1,23 @@
+# Phase 6 learning: configuration that lives outside the image.
+# Changing this and re-applying changes the app without building a new image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  namespace: learn
+data:
+  # A plain value, handed to the container as an environment variable.
+  GREETING: "Hello again - config changed, same image"
+
+  # A whole file, mounted into the container. The nginx image fills in
+  # ${GREETING} from the environment at startup (anything in
+  # /etc/nginx/templates/*.template). $hostname and $server_addr are nginx's own
+  # variables - the Pod's name and IP - so you can see which Pod answered.
+  default.conf.template: |
+    server {
+        listen 80;
+        location / {
+            default_type text/plain;
+            return 200 "${GREETING} - served by pod $hostname ($server_addr)\n";
+        }
+    }

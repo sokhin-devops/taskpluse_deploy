@@ -1,0 +1,41 @@
+# Traefik - the cluster's ingress controller: the one way HTTP gets in from outside.
+#
+# Chart traefik/traefik 41.6.1 (Traefik v3.7.13). Installed with:
+#   helm upgrade --install traefik traefik/traefik --version 41.6.1 \
+#     --namespace traefik --create-namespace -f cluster/traefik/values.yaml
+#
+# Only settings that differ from the chart's defaults are here.
+
+# One Traefik on every worker, listening on the node's own ports 80 and 443.
+# Vultr has no free load balancer, so traffic arrives straight at the workers;
+# the control plane is skipped automatically (its taint keeps app pods off).
+deployment:
+  kind: DaemonSet
+
+# Inside the pod Traefik listens on 8000/8443 (no root needed); hostPort maps
+# the node's 80/443 onto them.
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
+
+# A node's port 80 can be held by only one Traefik. The chart's default update
+# starts the new pod before stopping the old one - on the same node the new one
+# would wait forever for the port. Stop first, then start, one node at a time.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
+# Reachable inside the cluster only. A LoadBalancer Service would ask the cloud
+# for a paid load balancer, which kubeadm on plain VMs can't create anyway.
+service:
+  spec:
+    type: ClusterIP
+
+# Ingress objects that don't name a class are handled by Traefik.
+ingressClass:
+  enabled: true
+  isDefaultClass: true

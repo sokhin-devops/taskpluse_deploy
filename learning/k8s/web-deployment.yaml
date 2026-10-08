@@ -1,0 +1,55 @@
+# Phase 6 learning: the same Deployment `kubectl create deployment` made, written
+# out in full - plus the ConfigMap wired in. A Helm chart is files like this one
+# with the changing parts (image tag, replicas, ...) left as blanks.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: learn
+  labels:
+    app: web
+spec:
+  replicas: 3
+  # Which Pods this Deployment owns. Must match the template's labels below,
+  # and can never be changed after creation.
+  selector:
+    matchLabels:
+      app: web
+  # The Pod "cookie cutter". Changing anything in here creates a new ReplicaSet
+  # and rolls the Pods over to it one by one.
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.30.5
+          ports:
+            - containerPort: 80
+          env:
+            - name: GREETING
+              valueFrom:
+                configMapKeyRef:
+                  name: web-config
+                  key: GREETING
+            # From a Secret, not the ConfigMap: who may read Secrets is
+            # controlled separately (RBAC), and `kubectl describe` never shows
+            # their values. The Secret itself is created with kubectl, never
+            # written into this repository.
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: web-secret
+                  key: API_TOKEN
+          volumeMounts:
+            - name: nginx-templates
+              mountPath: /etc/nginx/templates
+      volumes:
+        # Only the template key becomes a file; GREETING stays an env variable.
+        - name: nginx-templates
+          configMap:
+            name: web-config
+            items:
+              - key: default.conf.template
+                path: default.conf.template
