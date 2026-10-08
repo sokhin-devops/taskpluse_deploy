@@ -1,0 +1,152 @@
+---
+# Creates the TaskPluse infrastructure on whichever Vultr account VULTR_API_KEY
+# belongs to. Safe to run again: every task describes the end state, so a second
+# run changes nothing unless something is missing.
+#
+# Two stages, so nothing is billed until you decide:
+#   --tags foundation   SSH key, private network, firewall   (free)
+#   --tags instances    the VMs                              (billing starts)
+# With no --tags, both run.
+- name: Provision TaskPluse infrastructure on Vultr
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/infrastructure.yml
+
+  tasks:
+
+    - name: Stop early if no API key is loaded
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'VULTR_API_KEY') | length > 0
+        fail_msg: "VULTR_API_KEY is not set in this shell. Run: source scripts/session.sh"
+        quiet: true
+      tags: always
+
+    - name: Read the account balance
+      vultr.cloud.account_info:
+      register: account
+      tags: always
+
+    - name: Show what this run is spending from
+      ansible.builtin.debug:
+        msg: >-
+          Balance {{ account.vultr_account_info.balance }}
+          (negative = credit), pending charges {{ account.vultr_account_info.pending_charges }}
+      tags: always
+
+    # The admin firewall rules allow exactly this address. Override with
+    # -e admin_ip=203.0.113.7 if detection picks the wrong one.
+    - name: Detect the public IP this playbook runs from
+      ansible.builtin.uri:
+        url: https://api.ipify.org
+        return_content: true
+      register: detected_ip
+      when: admin_ip is not defined
+      # A read-only lookup; without this, --check would skip it and leave admin_ip empty.
+      check_mode: false
+      tags: always
+
+    - name: Remember the admin IP
+      ansible.builtin.set_fact:
+        admin_ip: "{{ admin_ip | default(detected_ip.content | trim) }}"
+      tags: always
+
+    - name: Make sure the admin IP is a plain IPv4 address
+      ansible.builtin.assert:
+        that: admin_ip is match('^\d{1,3}(\.\d{1,3}){3}$')
+        fail_msg: "Got '{{ admin_ip }}' as the admin IP. Pass one explicitly: -e admin_ip=<your IPv4>"
+        success_msg: "Admin access will be allowed from {{ admin_ip }}/32"
+      tags: always
+
+    # ---- foundation: free resources ----------------------------------------
+
+    - name: Upload the admin SSH public key
+      vultr.cloud.ssh_key:
+        name: "{{ vultr_ssh_key_name }}"
+        ssh_key: "{{ lookup('ansible.builtin.file', vultr_ssh_public_key_file | expanduser) }}"
+      tags: foundation
+
+    - name: Create the private network
+      vultr.cloud.vpc:
+        description: "{{ vultr_vpc_name }}"
+        region: "{{ vultr_region }}"
+        v4_subnet: "{{ vultr_vpc_subnet }}"
+        v4_subnet_mask: "{{ vultr_vpc_subnet_mask }}"
+      tags: foundation
+
+    - name: Create the firewall groups
+      vultr.cloud.firewall_group:
+        description: "{{ item }}"
+      loop: "{{ vultr_firewall_groups }}"
+      tags: foundation
+
+    - name: Allow admin access from your IP
+      vultr.cloud.firewall_rule:
+        group: "{{ item.group }}"
+        port: "{{ item.port }}"
+        protocol: tcp
+        ip_type: v4
+        subnet: "{{ admin_ip }}"
+        subnet_size: 32
+        notes: "admin {{ item.port }}"
+      loop: "{{ vultr_firewall_rules | selectattr('from', 'equalto', 'admin') | list }}"
+      loop_control:
+        label: "{{ item.group }} :{{ item.port }} <- {{ admin_ip }}"
+      tags: foundation
+
+    - name: Allow Cloudflare to reach the ingress
+      vultr.cloud.firewall_rule:
+        group: "{{ item.group }}"
+        port: "{{ item.port }}"
+        protocol: tcp
+        ip_type: v4
+        source: cloudflare
+        notes: "cloudflare {{ item.port }}"
+      loop: "{{ vultr_firewall_rules | selectattr('from', 'equalto', 'cloudflare') | list }}"
+      loop_control:
+        label: "{{ item.group }} :{{ item.port }} <- cloudflare"
+      tags: foundation
+
+    # ---- instances: billing starts here --------------------------------------
+
+    # IPv6, Vultr backups and DDoS protection are all off: IPv6 complicates the
+    # first Kubernetes build, backups cost 20% extra (the database is backed up
+    # with pg_dump instead), and DDoS protection is $10/month per VM.
+    - name: Create the VMs
+      vultr.cloud.instance:
+        label: "{{ item.name }}"
+        hostname: "{{ item.name }}"
+        region: "{{ vultr_region }}"
+        plan: "{{ item.plan }}"
+        os: "{{ vultr_os }}"
+        ssh_keys:
+          - "{{ vultr_ssh_key_name }}"
+        vpcs:
+          - "{{ vultr_vpc_name }}"
+        firewall_group: "{{ item.firewall }}"
+        tags:
+          - "{{ project_tag }}"
+          - "role-{{ item.role }}"
+        enable_ipv6: false
+        backups: false
+        ddos_protection: false
+        activation_email: false
+      loop: "{{ vultr_instances }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.plan }})"
+      register: created
+      tags: instances
+
+    - name: Show the machines
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.vultr_instance.label }}:
+          public {{ item.vultr_instance.main_ip }},
+          private {{ item.vultr_instance.internal_ip | default('pending', true) }}
+      loop: "{{ created.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: created.results is defined and not ansible_check_mode
+      tags: instances

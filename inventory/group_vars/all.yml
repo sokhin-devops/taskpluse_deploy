@@ -1,0 +1,9 @@
+---
+# A fresh Vultr image has only root, so the first contact has to be as root.
+# setup-server.yml (Phase 4) creates a named admin user and turns root SSH off;
+# this changes to that user then.
+ansible_user: root
+
+# The passphrase-protected key made for these servers. Load it once per shell with
+# `source scripts/session.sh` so Ansible doesn't stop to ask for the passphrase.
+ansible_ssh_private_key_file: ~/.ssh/taskpluse_vultr

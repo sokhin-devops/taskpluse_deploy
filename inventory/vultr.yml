@@ -1,0 +1,29 @@
+# Dynamic inventory: every run asks the Vultr API which machines exist.
+#
+# Check what Ansible sees with:  ansible-inventory --graph
+plugin: vultr.cloud.vultr
+
+# Read from the environment at run time - the key itself is never in this file.
+# Spelled out because vultr.cloud 1.14 dropped the inventory plugin's automatic
+# VULTR_API_KEY fallback (the modules still have it).
+api_key: "{{ lookup('ansible.builtin.env', 'VULTR_API_KEY') }}"
+
+# Only machines this project created. Anything else in the account stays invisible
+# to Ansible, so no playbook can touch it by accident.
+filters:
+  - '"taskpluse" in vultr_tags'
+
+# The Vultr label (k8s-worker-1, ...) becomes the inventory name; these set how
+# Ansible reaches each machine and which address the cluster uses internally.
+compose:
+  ansible_host: vultr_main_ip
+  private_ip: vultr_internal_ip
+
+# Groups come from the role-* tag that provision-vultr.yml puts on each VM.
+groups:
+  k8s_control_plane: '"role-k8s-control-plane" in vultr_tags'
+  k8s_workers: '"role-k8s-worker" in vultr_tags'
+  k8s_cluster: '"role-k8s-control-plane" in vultr_tags or "role-k8s-worker" in vultr_tags'
+  registry: '"role-registry" in vultr_tags'
+  database: '"role-database" in vultr_tags'
+  jenkins: '"role-jenkins" in vultr_tags'

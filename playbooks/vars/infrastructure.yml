@@ -1,0 +1,66 @@
+---
+# The whole Vultr footprint in one file. Rebuilding on another account is: new
+# API key, this same file, `ansible-playbook playbooks/provision-vultr.yml`.
+
+vultr_region: sgp                  # Singapore - closest region to Phnom Penh
+vultr_os: Ubuntu 24.04 LTS x64
+
+# Every resource carries this tag. inventory/vultr.yml only sees tagged machines.
+project_tag: taskpluse
+
+vultr_ssh_key_name: taskpluse-admin
+vultr_ssh_public_key_file: ~/.ssh/taskpluse_vultr.pub
+
+# Private network between the VMs. Kubernetes, Jenkins -> Nexus, and the API ->
+# PostgreSQL all talk over this, so none of those ports need to face the internet.
+vultr_vpc_name: taskpluse-vpc
+vultr_vpc_subnet: 10.20.0.0
+vultr_vpc_subnet_mask: 24
+
+# Plans are Vultr Singapore list prices checked on 2026-10-08. Total: $110/month.
+# Vultr can upgrade a plan in place but never downgrade one, so start small.
+vultr_instances:
+  - name: k8s-control-plane        # API server, etcd, scheduler - no app pods
+    plan: vc2-2c-4gb               # $20
+    role: k8s-control-plane
+    firewall: taskpluse-k8s-control-plane
+  - name: k8s-worker-1             # Traefik + TaskPluse staging and production
+    plan: vc2-2c-4gb               # $20
+    role: k8s-worker
+    firewall: taskpluse-k8s-worker
+  - name: k8s-worker-2             # second node, so pods can spread
+    plan: vc2-2c-4gb               # $20
+    role: k8s-worker
+    firewall: taskpluse-k8s-worker
+  - name: registry-vm              # Nexus Docker registry
+    plan: vc2-2c-4gb               # $20
+    role: registry
+    firewall: taskpluse-private
+  - name: db-vm                    # PostgreSQL + pg_dump backups
+    plan: vc2-1c-2gb               # $10
+    role: database
+    firewall: taskpluse-private
+  - name: jenkins-vm               # Jenkins + Docker builds
+    plan: vc2-2c-4gb               # $20
+    role: jenkins
+    firewall: taskpluse-private
+
+# Vultr's firewall filters the public interface only; traffic on the private
+# network is not affected. A VM belongs to exactly one firewall group, which is
+# why SSH is repeated in each.
+#   from: admin       -> the public IP this playbook runs from (your home IP)
+#   from: cloudflare  -> Vultr's built-in list of Cloudflare's IP ranges
+vultr_firewall_groups:
+  - taskpluse-k8s-control-plane
+  - taskpluse-k8s-worker
+  - taskpluse-private
+
+vultr_firewall_rules:
+  - { group: taskpluse-k8s-control-plane, port: "22", from: admin }
+  - { group: taskpluse-k8s-control-plane, port: "6443", from: admin }   # kubectl from WSL
+  - { group: taskpluse-k8s-worker, port: "22", from: admin }
+  - { group: taskpluse-k8s-worker, port: "80", from: admin }            # test before DNS exists
+  - { group: taskpluse-k8s-worker, port: "443", from: admin }
+  - { group: taskpluse-k8s-worker, port: "80", from: cloudflare }
+  - { group: taskpluse-k8s-worker, port: "443", from: cloudflare }
+  - { group: taskpluse-private, port: "22", from: admin }

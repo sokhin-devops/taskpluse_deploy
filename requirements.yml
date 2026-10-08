@@ -1,11 +1,27 @@
 ---
 # Install with:  ansible-galaxy collection install -r requirements.yml
 #
-# Every playbook here uses community.docker. Without this file a fresh machine
-# fails with "couldn't resolve module/action", which reads like a typo rather
-# than a missing dependency.
+# Without this file a fresh machine fails with "couldn't resolve module/action",
+# which reads like a typo rather than a missing dependency.
+#
+# Each range allows patch and minor updates and blocks the next major version -
+# collections follow semver, so a new major is where breaking changes land.
 collections:
+  # Creates the VMs, private network and firewall, and discovers them as inventory.
+  # 1.14.1 is the floor: older versions send request bodies without a
+  # Content-Type header, and the Vultr API answers every create with
+  # "400 Missing name field". Ubuntu's package ships 1.13.0.
+  - name: vultr.cloud
+    version: ">=1.14.1,<2.0.0"
+  # sysctl, authorized_key, mounts - host preparation for Kubernetes.
+  - name: ansible.posix
+    version: ">=2.1.0,<3.0.0"
+  # UFW and other host hardening.
+  - name: community.general
+    version: ">=12.0.0,<13.0.0"
+  # Helm and Kubernetes objects from Ansible.
+  - name: kubernetes.core
+    version: ">=6.0.0,<7.0.0"
+  # Docker on the Jenkins and Nexus VMs.
   - name: community.docker
-    # Allow patch and minor updates, block the next major version - collections
-    # follow semver, so 6.x is where breaking changes are allowed to land.
     version: ">=5.0.0,<6.0.0"

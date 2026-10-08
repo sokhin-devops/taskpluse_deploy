@@ -1,0 +1,25 @@
+# Secrets never enter this repository. Each line is a file this project creates
+# or handles at some point.
+
+# Ansible Vault password
+.vault_pass*
+vault_pass*
+
+# Kubernetes credentials (admin.conf copied from the control plane, Jenkins token)
+kubeconfig*
+*.kubeconfig
+admin.conf
+
+# Private keys and certificates
+*.pem
+*.key
+id_*
+!*.pub
+
+# Environment files with real values
+.env
+.env.*
+!.env.example
+
+# Ansible leftovers
+*.retry
