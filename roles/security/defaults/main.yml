@@ -11,6 +11,10 @@ ufw_allowed_tcp_ports: [22]
 # Extra public ports per server group - see inventory/group_vars/<group>.yml.
 ufw_extra_tcp_ports: []
 
+# Sources trusted on every port. Kubernetes nodes add the pod network.
+ufw_trusted_networks:
+  - { cidr: "{{ private_network_cidr }}", comment: taskpluse private network }
+
 # Ordinary servers don't forward traffic. Kubernetes nodes override this to allow.
 ufw_routed_policy: deny
 

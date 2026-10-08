@@ -1,0 +1,140 @@
+---
+# Prepares a machine to become a Kubernetes node - control plane or worker alike.
+# Nothing here creates or joins a cluster; control_plane.yml and worker.yml do.
+
+# The kubelet refuses to start with swap on by default: a pod's memory limit only
+# means something if the kernel can't quietly page the pod out to disk.
+- name: Switch swap off now
+  ansible.builtin.command: swapoff -a
+  when: ansible_facts.swaptotal_mb > 0
+
+- name: Keep swap off after a reboot
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+# overlay: how containerd layers image filesystems.
+# br_netfilter: lets iptables see traffic crossing the pod network bridge, which
+# is how Services and NetworkPolicies are enforced.
+- name: Load the kernel modules containers and pod networking need
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop: [overlay, br_netfilter]
+
+# ip_forward is also what turns UFW's routed policy from "disabled" into the
+# ACCEPT that security/ufw.yml saved for these nodes.
+- name: Let pod traffic be routed and filtered
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+    reload: true
+  loop:
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+    - net.ipv4.ip_forward
+
+# ---- container runtime ------------------------------------------------------
+
+# Ubuntu 24.04's own containerd (2.x, from noble-updates) - no extra repository.
+- name: Install containerd
+  ansible.builtin.apt:
+    name: containerd
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Read containerd's built-in default configuration
+  ansible.builtin.command: containerd config default
+  register: containerd_default
+  changed_when: false
+
+# Kubernetes and containerd must agree on who manages cgroups. On a systemd
+# machine that is systemd; containerd's default is its own driver, which leaves
+# two managers fighting over the same resources under memory pressure.
+- name: Switch containerd to the systemd cgroup driver
+  ansible.builtin.set_fact:
+    containerd_config: "{{ containerd_default.stdout | regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}"
+
+- name: Make sure the setting was really there to switch
+  ansible.builtin.assert:
+    that: "'SystemdCgroup = true' in containerd_config"
+    fail_msg: "containerd's default config has no 'SystemdCgroup = false' line to change - its format changed; update this task."
+    quiet: true
+
+- name: Create containerd's configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0755"
+
+- name: Write containerd's configuration
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ containerd_config }}\n"
+    mode: "0644"
+  notify: Restart containerd
+
+# crictl is kubectl's counterpart one level down: it talks to containerd
+# directly, which is how you debug a node whose kubelet isn't working.
+- name: Point crictl at containerd
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+    mode: "0644"
+
+- name: Apply a changed containerd configuration before the kubelet uses it
+  ansible.builtin.meta: flush_handlers
+
+# ---- kubelet, kubeadm, kubectl ----------------------------------------------
+
+# deb822_repository needs this Python library on the server itself.
+- name: Install the library Ansible uses to manage apt sources
+  ansible.builtin.apt:
+    name: python3-debian
+    state: present
+
+- name: Add the Kubernetes {{ kubernetes_minor }} package repository
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_minor }}/deb/Release.key"
+  register: kubernetes_repo
+
+- name: Install kubelet, kubeadm and kubectl {{ kubernetes_version }}
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ kubernetes_version }}-*"
+      - "kubeadm={{ kubernetes_version }}-*"
+      - "kubectl={{ kubernetes_version }}-*"
+    update_cache: "{{ kubernetes_repo.changed }}"
+    allow_change_held_packages: true
+
+# A cluster upgrade is a planned procedure (control plane first, then each node),
+# never a side effect of `apt upgrade` or the nightly security updates.
+- name: Hold them at this version
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+# The kubelet registers the address of the default route - the public one -
+# unless told otherwise. Nodes must find each other on the private network.
+- name: Make the kubelet use the private network address
+  ansible.builtin.copy:
+    dest: /etc/default/kubelet
+    content: "KUBELET_EXTRA_ARGS=--node-ip={{ private_ip }}\n"
+    mode: "0644"
+
+# It restarts in a loop until kubeadm init/join gives it a configuration. Normal.
+- name: Enable the kubelet
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true

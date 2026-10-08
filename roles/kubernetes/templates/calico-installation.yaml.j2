@@ -1,0 +1,24 @@
+# Managed by Ansible (roles/kubernetes). Tells the Calico operator how to build
+# the pod network.
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    # VXLAN wraps pod traffic in ordinary UDP between node addresses, so the
+    # Vultr private network only ever sees 10.20.0.x packets. BGP (routing pod
+    # addresses directly) isn't needed with it.
+    bgp: Disabled
+    ipPools:
+      - name: default-ipv4-ippool
+        cidr: {{ pod_network_cidr }}
+        blockSize: 26
+        encapsulation: VXLAN
+        # Pods reaching the internet leave with their node's address.
+        natOutgoing: Enabled
+        nodeSelector: all()
+    # Use the address the kubelet registered (the private one, --node-ip),
+    # not whichever interface Calico finds first - that would be the public one.
+    nodeAddressAutodetectionV4:
+      kubernetes: NodeInternalIP

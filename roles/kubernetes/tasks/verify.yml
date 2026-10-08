@@ -1,0 +1,30 @@
+---
+# Run on the control plane once every node has joined.
+
+- name: Wait until every node is Ready
+  ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=600s
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  changed_when: false
+
+- name: Read the nodes
+  ansible.builtin.command: kubectl get nodes -o wide
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  register: nodes
+  changed_when: false
+
+- name: Show the nodes
+  ansible.builtin.debug:
+    var: nodes.stdout_lines
+
+- name: Read every pod in the cluster
+  ansible.builtin.command: kubectl get pods --all-namespaces -o wide
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  register: pods
+  changed_when: false
+
+- name: Show every pod
+  ansible.builtin.debug:
+    var: pods.stdout_lines

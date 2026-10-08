@@ -1,0 +1,29 @@
+# Managed by Ansible (roles/kubernetes). Used once, by `kubeadm init`.
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  # The API server listens on the private network; workers join over it.
+  advertiseAddress: {{ private_ip }}
+  bindPort: 6443
+nodeRegistration:
+  name: {{ inventory_hostname }}
+  criSocket: unix:///run/containerd/containerd.sock
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: taskpluse
+kubernetesVersion: v{{ kubernetes_version }}
+apiServer:
+  # Names the API server's certificate is valid for. The public address is
+  # there so kubectl from your machine can verify it over the internet.
+  certSANs:
+    - {{ private_ip }}
+    - {{ ansible_host }}
+networking:
+  podSubnet: {{ pod_network_cidr }}
+  serviceSubnet: {{ service_cidr }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# Must match containerd's SystemdCgroup = true (roles/kubernetes/tasks/main.yml).
+cgroupDriver: systemd

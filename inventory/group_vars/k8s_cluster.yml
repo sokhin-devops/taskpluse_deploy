@@ -1,4 +1,22 @@
 ---
+# Versions, pinned together. Calico 3.32 is tested against Kubernetes 1.34-1.36;
+# change both together when upgrading. Checked on 2026-10-08:
+#   Kubernetes 1.36.5 - one minor behind the newest (1.37.1), fifth patch release
+#   Calico 3.32.2     - 3.33.0 was one week old
+kubernetes_version: "1.36.5"
+calico_version: "3.32.2"
+
+# Address ranges inside the cluster. Neither may overlap the private network
+# (10.20.0.0/24): pods get 192.168.x.x, Services get 10.96.x.x.
+pod_network_cidr: 192.168.0.0/16
+service_cidr: 10.96.0.0/12
+
 # Kubernetes nodes forward traffic between pods, so UFW must not drop routed
 # packets the way it does on an ordinary server.
 ufw_routed_policy: allow
+
+# A pod talking to its own node (e.g. CoreDNS -> API server) arrives with its pod
+# IP, not a 10.20.0.x address, so the pod network is trusted here as well.
+ufw_trusted_networks:
+  - { cidr: "{{ private_network_cidr }}", comment: taskpluse private network }
+  - { cidr: "{{ pod_network_cidr }}", comment: taskpluse pod network }

@@ -39,6 +39,12 @@ if ! ssh-add -l 2>/dev/null | grep -q "taskpluse-vultr-admin"; then
     ssh-add "$HOME/.ssh/taskpluse_vultr"
 fi
 
+# kubectl on this machine: the cluster-admin config saved by setup-kubernetes.yml.
+if [ -f "$HOME/.kube/taskpluse.conf" ]; then
+    export KUBECONFIG="$HOME/.kube/taskpluse.conf"
+    echo "KUBECONFIG=$KUBECONFIG"
+fi
+
 echo "ANSIBLE_CONFIG=$ANSIBLE_CONFIG"
 echo "VULTR_API_KEY loaded (${#VULTR_API_KEY} characters)"
 ssh-add -l | grep "taskpluse-vultr-admin"

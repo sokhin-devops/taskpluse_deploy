@@ -1,0 +1,12 @@
+---
+# kubernetes_version, calico_version and the cluster address ranges are set in
+# inventory/group_vars/k8s_cluster.yml, where they are pinned together.
+
+# pkgs.k8s.io keeps one repository per minor version (v1.36, v1.37, ...).
+kubernetes_minor: "{{ kubernetes_version.split('.')[:2] | join('.') }}"
+
+kubernetes_admin_conf: /etc/kubernetes/admin.conf
+
+# Where the cluster-admin kubeconfig is saved on the machine running Ansible.
+# It is the master key to the cluster: it never goes into git.
+kubeconfig_local_path: "{{ lookup('ansible.builtin.env', 'HOME') }}/.kube/taskpluse.conf"

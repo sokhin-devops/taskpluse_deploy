@@ -1,0 +1,22 @@
+---
+# Joins a prepared node to the cluster as a worker. Run after main.yml, and after
+# control_plane.yml has created the cluster. Safe to re-run: a joined node is skipped.
+
+- name: Check whether this node already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+# A fresh token that expires in 15 minutes - long enough to join, useless if it
+# ever leaks. no_log keeps the token out of the output.
+- name: Get a join command from the control plane
+  ansible.builtin.command: kubeadm token create --print-join-command --ttl 15m
+  delegate_to: "{{ groups['k8s_control_plane'][0] }}"
+  register: join_command
+  when: not kubelet_conf.stat.exists
+  no_log: true
+
+- name: Join the cluster (kubeadm join)
+  ansible.builtin.command: "{{ join_command.stdout }}"
+  when: not kubelet_conf.stat.exists
+  no_log: true

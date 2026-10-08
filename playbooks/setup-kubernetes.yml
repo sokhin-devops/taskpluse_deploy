@@ -1,0 +1,39 @@
+---
+# Builds the Kubernetes cluster with kubeadm: one control plane, the workers
+# joined over the private network, Calico for pod networking.
+#
+# Run setup-server.yml first - this relies on its firewall rules (private and
+# pod networks trusted, forwarding allowed on these nodes). Safe to re-run.
+
+- name: Prepare every Kubernetes node
+  hosts: k8s_cluster
+  become: true
+  roles:
+    - kubernetes
+
+- name: Create the control plane
+  hosts: k8s_control_plane
+  become: true
+  tasks:
+    - name: Run kubeadm init and install the pod network
+      ansible.builtin.include_role:
+        name: kubernetes
+        tasks_from: control_plane
+
+- name: Join the workers
+  hosts: k8s_workers
+  become: true
+  tasks:
+    - name: Run kubeadm join
+      ansible.builtin.include_role:
+        name: kubernetes
+        tasks_from: worker
+
+- name: Check the whole cluster
+  hosts: k8s_control_plane
+  become: true
+  tasks:
+    - name: Wait for every node and show the cluster
+      ansible.builtin.include_role:
+        name: kubernetes
+        tasks_from: verify

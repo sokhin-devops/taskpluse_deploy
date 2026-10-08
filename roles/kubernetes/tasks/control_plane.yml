@@ -1,0 +1,155 @@
+---
+# Creates the cluster on the control plane node and installs the pod network.
+# Run after main.yml. Safe to re-run: `kubeadm init` only runs once.
+
+- name: Write the kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-config.yaml
+    mode: "0600"
+
+# Catches a typo or a field this kubeadm version doesn't know, before anything
+# is created.
+- name: Check the configuration with kubeadm
+  ansible.builtin.command: kubeadm config validate --config /etc/kubernetes/kubeadm-config.yaml
+  changed_when: false
+
+# kubeadm's full output includes a join command with a secret token, so only the
+# success lines are shown. Workers get their own short-lived token in worker.yml.
+- name: Create the control plane (kubeadm init)
+  ansible.builtin.command: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml
+  args:
+    creates: "{{ kubernetes_admin_conf }}"
+  register: kubeadm_init
+
+- name: Show what kubeadm did
+  ansible.builtin.debug:
+    msg: "{{ kubeadm_init.stdout_lines | select('search', 'initialized successfully|\\[addons\\] Applied') | list }}"
+  when: kubeadm_init is changed
+
+- name: Create the admin user's kubectl directory
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.kube"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Let the admin user run kubectl on this node
+  ansible.builtin.copy:
+    src: "{{ kubernetes_admin_conf }}"
+    dest: "/home/{{ admin_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0600"
+
+# ---- pod network (Calico) ----------------------------------------------------
+
+# Calico ships its resource types (CRDs) in their own file, separate from the
+# operator, and they must exist first. `create`, not `apply`: these definitions
+# are too large for the annotation `kubectl apply` stores on each object.
+- name: Check whether Calico's resource types are installed
+  ansible.builtin.command: kubectl get crd installations.operator.tigera.io
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  register: calico_crds
+  changed_when: false
+  failed_when: false
+
+- name: Install Calico's resource types {{ calico_version }}
+  ansible.builtin.command: >-
+    kubectl create -f
+    https://raw.githubusercontent.com/projectcalico/calico/v{{ calico_version }}/manifests/operator-crds.yaml
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  when: calico_crds.rc != 0
+
+- name: Check whether the Calico operator is installed
+  ansible.builtin.command: kubectl get namespace tigera-operator
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  register: tigera_namespace
+  changed_when: false
+  failed_when: false
+
+- name: Install the Calico operator {{ calico_version }}
+  ansible.builtin.command: >-
+    kubectl create -f
+    https://raw.githubusercontent.com/projectcalico/calico/v{{ calico_version }}/manifests/tigera-operator.yaml
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  when: tigera_namespace.rc != 0
+
+# A new resource type takes a moment to be registered with the API server; an
+# Installation submitted before that is rejected.
+- name: Wait for the Installation resource type to be registered
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Established --timeout=120s
+    crd/installations.operator.tigera.io
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  changed_when: false
+
+- name: Write the Calico network settings
+  ansible.builtin.template:
+    src: calico-installation.yaml.j2
+    dest: /etc/kubernetes/calico-installation.yaml
+    mode: "0644"
+  register: calico_settings
+
+- name: Check whether the Calico network settings exist in the cluster
+  ansible.builtin.command: kubectl get installation default
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  register: calico_installation
+  changed_when: false
+  failed_when: false
+
+# Applied only when the file changed or the object is missing. The operator fills
+# in its own defaults inside ipPools; `kubectl apply` replaces that whole list
+# with the shorter one in this file, so applying on every run would rewrite the
+# Installation each time - "changed" forever, for nothing.
+- name: Apply the Calico network settings
+  ansible.builtin.command: kubectl apply -f /etc/kubernetes/calico-installation.yaml
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  when: calico_settings is changed or calico_installation.rc != 0
+
+# A node turns Ready only once its pod network works, so this is the real test
+# that Calico came up.
+- name: Wait for the control plane node to be Ready
+  ansible.builtin.command: kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=600s
+  environment:
+    KUBECONFIG: "{{ kubernetes_admin_conf }}"
+  changed_when: false
+
+# ---- kubectl from your machine ----------------------------------------------
+
+# no_log: the file holds the cluster-admin private key.
+- name: Read the admin kubeconfig
+  ansible.builtin.slurp:
+    src: "{{ kubernetes_admin_conf }}"
+  register: admin_kubeconfig
+  no_log: true
+
+- name: Create ~/.kube on this machine
+  ansible.builtin.file:
+    path: "{{ kubeconfig_local_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+# Same file, but pointed at the public address - the private one is unreachable
+# from outside Vultr. The certificate covers both (certSANs).
+- name: Save the admin kubeconfig on this machine
+  ansible.builtin.copy:
+    content: >-
+      {{ admin_kubeconfig.content | b64decode
+         | regex_replace('server: https://\S+', 'server: https://' ~ ansible_host ~ ':6443') }}
+    dest: "{{ kubeconfig_local_path }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  no_log: true

@@ -11,12 +11,16 @@
   loop: "{{ ufw_allowed_tcp_ports + ufw_extra_tcp_ports }}"
 
 # Kubernetes, Jenkins -> Nexus and the API -> PostgreSQL all talk over the
-# private network; none of those ports is open on the public side.
-- name: Trust everything from the private network
+# private network; none of those ports is open on the public side. Kubernetes
+# nodes also trust the pod network - see inventory/group_vars/k8s_cluster.yml.
+- name: Trust traffic from internal networks
   community.general.ufw:
     rule: allow
-    from_ip: "{{ private_network_cidr }}"
-    comment: taskpluse private network
+    from_ip: "{{ item.cidr }}"
+    comment: "{{ item.comment }}"
+  loop: "{{ ufw_trusted_networks }}"
+  loop_control:
+    label: "{{ item.cidr }}"
 
 - name: Block all other incoming traffic
   community.general.ufw:
