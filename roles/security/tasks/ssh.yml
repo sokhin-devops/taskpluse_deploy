@@ -22,7 +22,8 @@
 
     # Reads the whole configuration, drop-ins included, without touching the
     # running server. A bad file is caught here instead of at the next reboot,
-    # when sshd would refuse to start and the only way back is Vultr's console.
+    # when sshd would refuse to start and the only way back is the machine's
+    # console (a cloud provider's web console, or the VM host's).
     - name: Test the complete SSH configuration
       ansible.builtin.command: /usr/sbin/sshd -t
       changed_when: false

@@ -7,7 +7,7 @@ metadata:
 spec:
   calicoNetwork:
     # VXLAN wraps pod traffic in ordinary UDP between node addresses, so the
-    # Vultr private network only ever sees 10.20.0.x packets. BGP (routing pod
+    # private network only ever sees 10.20.0.x packets. BGP (routing pod
     # addresses directly) isn't needed with it.
     bgp: Disabled
     ipPools:

@@ -5,8 +5,9 @@
 #                                                      /v2/  -> 127.0.0.1:8082 (Docker API)
 #                                                      /     -> 127.0.0.1:8081 (UI, REST API)
 #
-# Nothing here is reachable from the internet: UFW and Vultr's firewall allow
-# only SSH publicly, and Nexus itself listens on 127.0.0.1 only.
+# Nothing here is reachable from the internet: the network in front forwards
+# nothing to it, UFW allows only SSH beyond the private network, and Nexus
+# itself listens on 127.0.0.1 only.
 
 - name: Certificate and HTTPS front end
   ansible.builtin.import_tasks: tls.yml

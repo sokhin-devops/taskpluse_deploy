@@ -7,7 +7,7 @@
 # Only settings that differ from the chart's defaults are here.
 
 # One Traefik on every worker, listening on the node's own ports 80 and 443.
-# Vultr has no free load balancer, so traffic arrives straight at the workers;
+# There is no cloud load balancer, so traffic arrives straight at the workers;
 # the control plane is skipped automatically (its taint keeps app pods off).
 deployment:
   kind: DaemonSet

@@ -141,8 +141,9 @@
   delegate_to: localhost
   become: false
 
-# Same file, but pointed at the public address - the private one is unreachable
-# from outside Vultr. The certificate covers both (certSANs).
+# Same file, but pointed at ansible_host - the address this machine reaches the
+# control plane on. The certificate covers it as well as the private address
+# (certSANs).
 - name: Save the admin kubeconfig on this machine
   ansible.builtin.copy:
     content: >-

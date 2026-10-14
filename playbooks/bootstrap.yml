@@ -1,6 +1,6 @@
 ---
 # First contact with fresh VMs: creates the admin user every other playbook logs
-# in as. A new Vultr image has only root, so this is the one playbook that
+# in as. A fresh Ubuntu image has only root, so this is the one playbook that
 # connects as root.
 #
 # Root login stays ON here. setup-server.yml switches it off, and only after the
