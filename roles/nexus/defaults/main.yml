@@ -1,0 +1,47 @@
+---
+# Nexus's REST API, reached on this host only.
+nexus_api: http://127.0.0.1:8081/service/rest/v1
+
+# The Docker repository. ALLOW_ONCE: a tag, once pushed, can never be replaced -
+# so `taskpluse-api:42-a1b2c3d` means the same image forever, which is what makes
+# a rollback to it trustworthy. latestPolicy false: no exception for `latest`
+# either, since this project never deploys `latest`.
+nexus_docker_repository_spec:
+  name: "{{ nexus_docker_repository }}"
+  online: true
+  storage:
+    blobStoreName: default
+    strictContentTypeValidation: true
+    writePolicy: ALLOW_ONCE
+    latestPolicy: false
+  docker:
+    v1Enabled: false
+    # Every request needs a login - nothing is readable anonymously.
+    forceBasicAuth: true
+    httpPort: "{{ nexus_docker_port }}"
+
+# Least privilege: Jenkins can add images but not delete them; Kubernetes can
+# only read. Nexus creates these privileges itself for every repository.
+nexus_roles:
+  - id: taskpluse-push
+    description: "Push and pull in the {{ nexus_docker_repository }} Docker repository (Jenkins)"
+    privileges:
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-browse"
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-read"
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-add"
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-edit"
+  - id: taskpluse-pull
+    description: "Pull from the {{ nexus_docker_repository }} Docker repository (Kubernetes)"
+    privileges:
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-browse"
+      - "nx-repository-view-docker-{{ nexus_docker_repository }}-read"
+
+# password_var names the variable holding the password, so the password itself
+# is never part of a loop item - Ansible prints loop items, including on errors.
+nexus_users:
+  - user: "{{ nexus_push_user }}"
+    password_var: nexus_push_password
+    role: taskpluse-push
+  - user: "{{ nexus_pull_user }}"
+    password_var: nexus_pull_password
+    role: taskpluse-pull

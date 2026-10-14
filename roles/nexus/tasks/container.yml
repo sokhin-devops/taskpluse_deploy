@@ -1,0 +1,36 @@
+---
+# The image runs Nexus as user 200, which must own the data directory.
+- name: Create the Nexus data directory
+  ansible.builtin.file:
+    path: "{{ nexus_data_dir }}"
+    state: directory
+    owner: "200"
+    group: "200"
+    mode: "0750"
+
+# Both ports are published on 127.0.0.1 only - see the Docker/UFW warning in
+# roles/docker. nginx on this host is the only way in.
+- name: Run Nexus {{ nexus_version }}
+  community.docker.docker_container:
+    name: nexus
+    image: "sonatype/nexus3:{{ nexus_version }}"
+    state: started
+    restart_policy: unless-stopped
+    memory: 3g
+    env:
+      INSTALL4J_ADD_VM_PARAMS: "{{ nexus_java_options }}"
+    published_ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:{{ nexus_docker_port }}:{{ nexus_docker_port }}"
+    volumes:
+      - "{{ nexus_data_dir }}:/nexus-data"
+
+# First start takes a few minutes (database creation, plugin start-up).
+- name: Wait until Nexus is ready
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8081/service/rest/v1/status/writable
+    status_code: 200
+  register: nexus_status
+  retries: 60
+  delay: 10
+  until: nexus_status.status == 200

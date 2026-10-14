@@ -39,6 +39,13 @@ if ! ssh-add -l 2>/dev/null | grep -q "taskpluse-vultr-admin"; then
     ssh-add "$HOME/.ssh/taskpluse_vultr"
 fi
 
+# Unlocks inventory/group_vars/all/vault.yml (made by scripts/create-vault.sh)
+# without a password prompt on every run.
+if [ -f "$HOME/.ansible/taskpluse-vault-pass" ]; then
+    export ANSIBLE_VAULT_PASSWORD_FILE="$HOME/.ansible/taskpluse-vault-pass"
+    echo "ANSIBLE_VAULT_PASSWORD_FILE=$ANSIBLE_VAULT_PASSWORD_FILE"
+fi
+
 # kubectl on this machine: the cluster-admin config saved by setup-kubernetes.yml.
 if [ -f "$HOME/.kube/taskpluse.conf" ]; then
     export KUBECONFIG="$HOME/.kube/taskpluse.conf"

@@ -1,0 +1,5 @@
+---
+# Test first: reloading a broken configuration would take the registry down.
+- name: Test and reload nginx
+  ansible.builtin.shell: nginx -t && systemctl reload nginx
+  changed_when: true

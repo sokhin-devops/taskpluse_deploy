@@ -1,0 +1,23 @@
+---
+# Nexus Repository Community Edition on registry-vm.
+# Checked 2026-10-08: 3.96.4 is the newest release.
+nexus_version: "3.96.4"
+nexus_admin_password: "{{ vault_nexus_admin_password }}"
+
+nexus_data_dir: /opt/nexus-data
+nexus_docker_repository: taskpluse
+# Nexus serves each Docker repository on its own port; nginx in front maps
+# https://registry.sokhin.site/v2/ to it.
+nexus_docker_port: 8082
+
+# Sonatype: give Nexus up to two-thirds of the RAM. On this 4 GB VM: a 1.2 GB
+# heap plus 1 GB direct memory, the rest for the OS and nginx.
+nexus_java_options: >-
+  -Xms1200m -Xmx1200m -XX:MaxDirectMemorySize=1g
+  -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+
+# Community Edition refuses to store or serve anything until its End User
+# License Agreement is accepted. Accepting it is the owner's decision, not the
+# playbook's: read https://links.sonatype.com/products/nxrm/ce-eula and change
+# this to true if you agree. setup-registry.yml stops with a message until then.
+nexus_accept_community_eula: false

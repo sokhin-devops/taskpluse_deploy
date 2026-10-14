@@ -1,0 +1,260 @@
+---
+# Everything below goes through Nexus's REST API as admin. Each setting is read
+# first and changed only if it differs, so a re-run reports changed=0.
+
+# ---- admin password -----------------------------------------------------------
+
+# On first start Nexus writes a random admin password to this file.
+- name: Look for the one-time admin password from first start
+  ansible.builtin.stat:
+    path: "{{ nexus_data_dir }}/admin.password"
+  register: nexus_initial_password_file
+
+- name: Replace the generated admin password with the vault's
+  when: nexus_initial_password_file.stat.exists
+  block:
+    - name: Read the generated admin password
+      ansible.builtin.slurp:
+        src: "{{ nexus_data_dir }}/admin.password"
+      register: nexus_initial_password
+      no_log: true
+
+    - name: Set the admin password from the vault
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users/admin/change-password"
+        method: PUT
+        user: admin
+        password: "{{ nexus_initial_password.content | b64decode | trim }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: text/plain
+        body: "{{ nexus_admin_password }}"
+        status_code: 204
+      no_log: true
+      changed_when: true
+
+    # Its job is done. Left behind it would look like a valid admin password.
+    - name: Delete the generated admin password file
+      ansible.builtin.file:
+        path: "{{ nexus_data_dir }}/admin.password"
+        state: absent
+
+# ---- everything else, as admin -----------------------------------------------
+
+- name: Configure Nexus
+  module_defaults:
+    ansible.builtin.uri:
+      user: admin
+      password: "{{ nexus_admin_password }}"
+      force_basic_auth: true
+      return_content: true
+  block:
+
+    # A 401 here means the vault and Nexus disagree about the admin password.
+    - name: Check the vault's admin password works
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/status/check"
+
+    # -- licence --
+
+    - name: Read the Community Edition licence status
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/system/eula"
+      register: nexus_eula
+
+    - name: Stop unless the licence has been accepted on purpose
+      ansible.builtin.assert:
+        that: nexus_eula.json.accepted or (nexus_accept_community_eula | bool)
+        fail_msg: >-
+          Nexus Community Edition stores nothing until its End User License Agreement is
+          accepted. Read https://links.sonatype.com/products/nxrm/ce-eula and, if you agree,
+          set nexus_accept_community_eula: true in inventory/group_vars/registry.yml.
+        quiet: true
+
+    # Nexus only accepts its own disclaimer text back, word for word.
+    - name: Accept the licence
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/system/eula"
+        method: POST
+        body_format: json
+        body:
+          accepted: true
+          disclaimer: "{{ nexus_eula.json.disclaimer }}"
+        status_code: [200, 204]
+      when: not nexus_eula.json.accepted
+      changed_when: true
+
+    # -- anonymous access --
+
+    - name: Read the anonymous access setting
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/anonymous"
+      register: nexus_anonymous
+
+    - name: Turn anonymous access off
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/anonymous"
+        method: PUT
+        body_format: json
+        body:
+          enabled: false
+          userId: anonymous
+          realmName: NexusAuthorizingRealm
+      when: nexus_anonymous.json.enabled
+      changed_when: true
+
+    # -- Docker logins --
+
+    # `docker login` uses bearer tokens, which Nexus only issues once this
+    # realm is active. Found by name, not a hard-coded ID.
+    - name: Read the available login realms
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/realms/available"
+      register: nexus_realms_available
+
+    - name: Read the active login realms
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/realms/active"
+      register: nexus_realms_active
+
+    - name: Find the Docker Bearer Token realm
+      ansible.builtin.set_fact:
+        nexus_docker_realm: "{{ (nexus_realms_available.json | selectattr('name', 'search', 'Docker') | first).id }}"
+
+    - name: Turn on Docker logins
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/realms/active"
+        method: PUT
+        body_format: json
+        body: "{{ nexus_realms_active.json + [nexus_docker_realm] }}"
+        status_code: 204
+      when: nexus_docker_realm not in nexus_realms_active.json
+      changed_when: true
+
+    # -- the Docker repository --
+
+    - name: Read the {{ nexus_docker_repository }} Docker repository
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/repositories/docker/hosted/{{ nexus_docker_repository }}"
+        status_code: [200, 404]
+      register: nexus_repo
+
+    - name: Create or correct the {{ nexus_docker_repository }} Docker repository
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/repositories/docker/hosted{{ '' if nexus_repo.status == 404 else '/' ~ nexus_docker_repository }}"
+        method: "{{ 'POST' if nexus_repo.status == 404 else 'PUT' }}"
+        body_format: json
+        body: "{{ nexus_docker_repository_spec }}"
+        status_code: [201, 204]
+      when: >-
+        nexus_repo.status == 404
+        or nexus_repo.json.storage.writePolicy | upper != 'ALLOW_ONCE'
+        or (nexus_repo.json.storage.latestPolicy | default(false)) != false
+        or nexus_repo.json.docker.httpPort | int != nexus_docker_port | int
+        or not nexus_repo.json.docker.forceBasicAuth
+        or nexus_repo.json.docker.v1Enabled
+      changed_when: true
+
+    # -- roles --
+
+    - name: Read the registry roles
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/roles/{{ item.id }}"
+        status_code: [200, 404]
+      loop: "{{ nexus_roles }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: nexus_role_lookup
+
+    - name: Create or correct the registry roles
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/roles{{ '' if item.status == 404 else '/' ~ item.item.id }}"
+        method: "{{ 'POST' if item.status == 404 else 'PUT' }}"
+        body_format: json
+        body:
+          id: "{{ item.item.id }}"
+          name: "{{ item.item.id }}"
+          description: "{{ item.item.description }}"
+          privileges: "{{ item.item.privileges }}"
+          roles: []
+        status_code: [200, 204]
+      loop: "{{ nexus_role_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+      when: item.status == 404 or (item.json.privileges | sort) != (item.item.privileges | sort)
+      changed_when: true
+
+    # -- users --
+
+    - name: Read the registry users
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users?userId={{ item.user }}"
+      loop: "{{ nexus_users }}"
+      loop_control:
+        label: "{{ item.user }}"
+      register: nexus_user_lookup
+
+    - name: Create missing registry users
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users"
+        method: POST
+        body_format: json
+        body:
+          userId: "{{ item.item.user }}"
+          firstName: "{{ item.item.user }}"
+          lastName: TaskPluse
+          emailAddress: "{{ item.item.user }}@{{ base_domain }}"
+          password: "{{ lookup('ansible.builtin.vars', item.item.password_var) }}"
+          status: active
+          roles: ["{{ item.item.role }}"]
+      loop: "{{ nexus_user_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.user }}"
+      when: item.json | selectattr('userId', 'equalto', item.item.user) | list | length == 0
+      no_log: true
+      changed_when: true
+
+    - name: Keep each user's role as defined
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users/{{ item.item.user }}"
+        method: PUT
+        body_format: json
+        body: "{{ existing | combine({'roles': [item.item.role]}) }}"
+        status_code: 204
+      vars:
+        existing: "{{ item.json | selectattr('userId', 'equalto', item.item.user) | first }}"
+      loop: "{{ nexus_user_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.user }}"
+      when: >-
+        item.json | selectattr('userId', 'equalto', item.item.user) | list | length > 0
+        and existing.roles != [item.item.role]
+      changed_when: true
+
+    # A login with the vault's password either works or it doesn't - that's the
+    # only way to know whether Nexus and the vault agree.
+    - name: Check each user's password against the vault
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/repositories"
+        user: "{{ item.user }}"
+        password: "{{ lookup('ansible.builtin.vars', item.password_var) }}"
+        status_code: [200, 401]
+      loop: "{{ nexus_users }}"
+      loop_control:
+        label: "{{ item.user }}"
+      register: nexus_user_login
+
+    - name: Reset passwords that don't match the vault
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users/{{ item.item.user }}/change-password"
+        method: PUT
+        headers:
+          Content-Type: text/plain
+        body: "{{ lookup('ansible.builtin.vars', item.item.password_var) }}"
+        status_code: 204
+      loop: "{{ nexus_user_login.results }}"
+      loop_control:
+        label: "{{ item.item.user }}"
+      when: item.status == 401
+      no_log: true
+      changed_when: true

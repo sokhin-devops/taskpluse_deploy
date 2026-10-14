@@ -1,0 +1,122 @@
+---
+# The private Docker registry: DNS record, Docker, Nexus behind HTTPS with its
+# accounts - then an end-to-end test from the machines that will really use it.
+#
+# Run setup-server.yml first. Needs the vault (scripts/create-vault.sh) and
+# nexus_accept_community_eula in inventory/group_vars/registry.yml. Safe to re-run.
+
+- name: Point the registry name at the registry's private address
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    # Grey cloud (not proxied): Cloudflare can't proxy a private address, and the
+    # point is that only machines on the private network can reach it at all.
+    - name: Create or update {{ registry_hostname }} in Cloudflare DNS
+      community.general.cloudflare_dns:
+        api_token: "{{ cloudflare_api_token }}"
+        zone: "{{ base_domain }}"
+        record: "{{ registry_hostname | replace('.' ~ base_domain, '') }}"
+        type: A
+        value: "{{ hostvars[groups['registry'][0]].private_ip }}"
+        proxied: false
+        ttl: 300
+        solo: true
+
+- name: Install Docker
+  hosts: registry:jenkins
+  become: true
+  roles:
+    - docker
+
+- name: Run Nexus as the Docker registry
+  hosts: registry
+  become: true
+  roles:
+    - nexus
+
+# ---- proof ----------------------------------------------------------------------
+
+- name: Prove Jenkins can push and the pull account can't
+  hosts: jenkins
+  become: true
+  tasks:
+    # A new tag every run: the repository refuses to overwrite a tag (ALLOW_ONCE).
+    - name: Pick a unique tag for the test image
+      ansible.builtin.set_fact:
+        smoke_image: "{{ registry_hostname }}/smoke-test:{{ now(utc=true, fmt='%Y%m%d%H%M%S') }}"
+
+    - name: Pull a small public image to test with
+      community.docker.docker_image_pull:
+        name: busybox
+        tag: "1.37"
+
+    - name: Log in as {{ nexus_push_user }}
+      community.docker.docker_login:
+        registry_url: "https://{{ registry_hostname }}"
+        username: "{{ nexus_push_user }}"
+        password: "{{ nexus_push_password }}"
+      no_log: true
+
+    - name: Push the test image as {{ nexus_push_user }}
+      community.docker.docker_image:
+        name: busybox:1.37
+        repository: "{{ smoke_image }}"
+        source: local
+        push: true
+
+    - name: Log in as {{ nexus_pull_user }}
+      community.docker.docker_login:
+        registry_url: "https://{{ registry_hostname }}"
+        username: "{{ nexus_pull_user }}"
+        password: "{{ nexus_pull_password }}"
+        reauthorize: true
+      no_log: true
+
+    # Expected to fail. Shown as "...ignoring" and checked by the next task.
+    - name: Try to push as {{ nexus_pull_user }} (must be refused)
+      community.docker.docker_image:
+        name: busybox:1.37
+        repository: "{{ smoke_image }}-should-be-denied"
+        source: local
+        push: true
+      register: denied_push
+      ignore_errors: true
+
+    - name: Check the pull-only account really was refused
+      ansible.builtin.assert:
+        that: denied_push is failed
+        fail_msg: "{{ nexus_pull_user }} was able to push - its role has too many privileges"
+        success_msg: "{{ nexus_pull_user }} cannot push - as intended"
+
+    - name: Log out of the registry
+      community.docker.docker_login:
+        registry_url: "https://{{ registry_hostname }}"
+        state: absent
+
+- name: Prove a Kubernetes node can pull
+  hosts: k8s_workers[0]
+  become: true
+  vars:
+    smoke_image: "{{ hostvars[groups['jenkins'][0]].smoke_image }}"
+  tasks:
+    # crictl talks to containerd directly - the same path the kubelet uses. It
+    # also proves containerd trusts the certificate with no extra setup. no_log
+    # hides the password on the command line; the next task shows the result.
+    - name: Pull the test image with the pull-only account
+      ansible.builtin.command: >-
+        crictl pull --creds {{ nexus_pull_user }}:{{ nexus_pull_password }} {{ smoke_image }}
+      register: node_pull
+      failed_when: false
+      changed_when: false
+      no_log: true
+
+    - name: Check the pull worked
+      ansible.builtin.assert:
+        that: node_pull.rc == 0
+        fail_msg: "crictl pull failed: {{ node_pull.stderr }}"
+        success_msg: "{{ inventory_hostname }} pulled {{ smoke_image }}: {{ node_pull.stdout }}"
+
+    - name: Remove the test image from the node
+      ansible.builtin.command: crictl rmi {{ smoke_image }}
+      changed_when: true

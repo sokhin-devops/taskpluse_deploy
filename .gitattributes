@@ -1,3 +1,6 @@
 # Shell scripts run in WSL, where a Windows line ending (\r) breaks every line.
 # This overrides core.autocrlf so they are always checked out with LF.
 *.sh text eol=lf
+
+# The encrypted vault stays byte-for-byte as ansible-vault wrote it.
+vault.yml text eol=lf

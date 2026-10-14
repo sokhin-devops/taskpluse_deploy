@@ -1,0 +1,83 @@
+---
+# A real Let's Encrypt certificate, so Docker and containerd trust the registry
+# with no extra configuration on any client. The DNS-01 challenge proves domain
+# ownership by creating a TXT record through Cloudflare's API - no port has to be
+# open to the internet, which is the only way for a registry that isn't.
+
+- name: Install nginx and certbot with its Cloudflare plugin
+  ansible.builtin.apt:
+    name: [nginx, certbot, python3-certbot-dns-cloudflare]
+    state: present
+
+- name: Create certbot's configuration directory
+  ansible.builtin.file:
+    path: /etc/letsencrypt
+    state: directory
+    mode: "0755"
+
+- name: Give certbot the Cloudflare token
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/cloudflare.ini
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# Runs once; afterwards certbot.timer renews it before it expires (90 days).
+- name: Get the certificate for {{ registry_hostname }}
+  ansible.builtin.command: >-
+    certbot certonly --non-interactive --agree-tos --register-unsafely-without-email
+    --dns-cloudflare --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+    --dns-cloudflare-propagation-seconds 30
+    -d {{ registry_hostname }}
+  args:
+    creates: "/etc/letsencrypt/live/{{ registry_hostname }}/fullchain.pem"
+
+# nginx reads the certificate at start-up; without this a renewed certificate
+# sits on disk unused until the next restart, and the old one expires.
+- name: Create certbot's deploy-hook directory
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    mode: "0755"
+
+- name: Reload nginx after every renewal
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+    content: |
+      #!/bin/sh
+      systemctl reload nginx
+    mode: "0755"
+
+- name: Keep the renewal timer on
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    state: started
+    enabled: true
+
+- name: Write the registry site
+  ansible.builtin.template:
+    src: nginx-registry.conf.j2
+    dest: /etc/nginx/sites-available/registry.conf
+    mode: "0644"
+  notify: Test and reload nginx
+
+- name: Enable the registry site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/registry.conf
+    dest: /etc/nginx/sites-enabled/registry.conf
+    state: link
+  notify: Test and reload nginx
+
+- name: Remove nginx's welcome page
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Test and reload nginx
+
+- name: Start nginx now and at every boot
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: started
+    enabled: true

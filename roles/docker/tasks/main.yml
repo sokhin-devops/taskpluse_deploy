@@ -1,0 +1,55 @@
+---
+# Docker Engine from Docker's own repository, for the machines that run or build
+# containers outside Kubernetes (registry-vm, jenkins-vm). Kubernetes nodes use
+# containerd directly and never get this role.
+#
+# WARNING - Docker and UFW: Docker publishes container ports by writing its own
+# iptables rules, which are checked BEFORE UFW's. A port published as "8081:8081"
+# is open to the internet whatever `ufw status` says. Publish only on 127.0.0.1
+# and put a reverse proxy in front, as roles/nexus does.
+
+# deb822_repository needs python3-debian; the community.docker modules need
+# python3-requests.
+- name: Install the Python libraries Ansible needs here
+  ansible.builtin.apt:
+    name: [python3-debian, python3-requests]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Add Docker's package repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: stable
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+  register: docker_repo
+
+# Not version-pinned: these come from Docker's repository, which the nightly
+# security updates leave alone, so the version changes only when this runs.
+- name: Install Docker Engine
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin]
+    state: present
+    update_cache: "{{ docker_repo.changed }}"
+
+# Container logs are files on the host and grow forever by default. A full disk
+# stops Nexus and Docker alike.
+- name: Cap container log size
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" }
+      }
+    mode: "0644"
+  notify: Restart docker
+
+- name: Start Docker now and at every boot
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true

@@ -1,0 +1,37 @@
+---
+# The named admin account every playbook logs in as. It has no password - only
+# the SSH key below - and passwordless sudo, which is what lets Ansible run
+# unattended. playbooks/bootstrap.yml creates it on fresh VMs (connecting as
+# root once); setup-server.yml then switches root login off.
+admin_user: deploy
+ansible_user: "{{ admin_user }}"
+
+# The passphrase-protected key made for these servers. Load it once per shell with
+# `source scripts/session.sh` so Ansible doesn't stop to ask for the passphrase.
+ansible_ssh_private_key_file: ~/.ssh/taskpluse_vultr
+admin_ssh_public_key_file: ~/.ssh/taskpluse_vultr.pub
+
+# The Vultr private network. Must match vultr_vpc_subnet / vultr_vpc_subnet_mask
+# in playbooks/vars/infrastructure.yml. Every server trusts traffic from it.
+private_network_cidr: 10.20.0.0/24
+
+# ---- names and secrets -------------------------------------------------------
+# Secret values live in vault.yml (encrypted, made by scripts/create-vault.sh).
+# They are only referenced here, so `grep -r vault_` shows every place a secret
+# is used.
+
+base_domain: sokhin.site
+
+# DNS-only access to this one zone (Cloudflare). Used to manage DNS records and
+# to prove domain ownership to Let's Encrypt without opening any port.
+cloudflare_api_token: "{{ vault_cloudflare_dns_api_token }}"
+
+# The private Docker registry (Nexus on registry-vm). This name resolves to the
+# registry's PRIVATE address, so only machines on the private network reach it.
+registry_hostname: "registry.{{ base_domain }}"
+
+# Nexus accounts with one job each: Jenkins pushes images, Kubernetes pulls them.
+nexus_push_user: jenkins-push
+nexus_push_password: "{{ vault_nexus_jenkins_password }}"
+nexus_pull_user: k8s-pull
+nexus_pull_password: "{{ vault_nexus_k8s_password }}"

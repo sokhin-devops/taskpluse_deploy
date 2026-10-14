@@ -1,0 +1,18 @@
+---
+# Nexus Repository as the private Docker registry, at https://{{ registry_hostname }}.
+#
+#   Jenkins / Kubernetes --443 (private network)--> nginx (TLS) --> Nexus container
+#                                                      /v2/  -> 127.0.0.1:8082 (Docker API)
+#                                                      /     -> 127.0.0.1:8081 (UI, REST API)
+#
+# Nothing here is reachable from the internet: UFW and Vultr's firewall allow
+# only SSH publicly, and Nexus itself listens on 127.0.0.1 only.
+
+- name: Certificate and HTTPS front end
+  ansible.builtin.import_tasks: tls.yml
+
+- name: Nexus container
+  ansible.builtin.import_tasks: container.yml
+
+- name: Nexus settings, repository and accounts
+  ansible.builtin.import_tasks: configure.yml
