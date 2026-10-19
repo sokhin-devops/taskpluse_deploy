@@ -35,26 +35,30 @@ credentials:
 # Pipeline jobs, defined here instead of clicked together (Job DSL). Each one
 # runs the Jenkinsfile from its repository's main branch. GitHub can't reach a
 # Jenkins on this PC, so Jenkins checks for new commits every 5 minutes instead.
+# One job per app, same shape. String concatenation instead of Groovy "${...}":
+# JCasC would try to fill ${...} in itself.
 jobs:
   - script: >
-      pipelineJob('taskpluse-api') {
-        description('TaskPluse API: test, scan, build, push to Nexus. Jenkinsfile in sokhin-devops/taskpluse_api.')
-        properties {
-          pipelineTriggers {
-            triggers {
-              pollSCM { scmpoll_spec('H/5 * * * *') }
-            }
-          }
-        }
-        definition {
-          cpsScm {
-            scm {
-              git {
-                remote { url('https://github.com/sokhin-devops/taskpluse_api.git') }
-                branch('*/main')
+      ['api': 'TaskPluse API', 'web': 'TaskPluse Web'].each { app, title ->
+        pipelineJob('taskpluse-' + app) {
+          description(title + ': test, scan, build, push to Nexus. Jenkinsfile in sokhin-devops/taskpluse_' + app + '.')
+          properties {
+            pipelineTriggers {
+              triggers {
+                pollSCM { scmpoll_spec('H/5 * * * *') }
               }
             }
-            scriptPath('Jenkinsfile')
+          }
+          definition {
+            cpsScm {
+              scm {
+                git {
+                  remote { url('https://github.com/sokhin-devops/taskpluse_' + app + '.git') }
+                  branch('*/main')
+                }
+              }
+              scriptPath('Jenkinsfile')
+            }
           }
         }
       }
