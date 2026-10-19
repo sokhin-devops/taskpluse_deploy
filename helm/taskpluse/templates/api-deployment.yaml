@@ -26,8 +26,7 @@ spec:
         # Changes whenever the ConfigMap does, so a config change rolls the Pods
         # (environment variables are only read at container start).
         checksum/config: {{ include (print $.Template.BasePath "/api-configmap.yaml") . | sha256sum }}
-        taskpluse.io/git-sha: {{ .Values.build.gitSha | quote }}
-        taskpluse.io/build-number: {{ .Values.build.number | quote }}
+        taskpluse.io/deployed-by: {{ .Values.deployedBy | quote }}
     spec:
       serviceAccountName: {{ include "taskpluse.fullname" . }}
       automountServiceAccountToken: false

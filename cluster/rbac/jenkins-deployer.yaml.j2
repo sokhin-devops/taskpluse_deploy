@@ -1,0 +1,69 @@
+# Jenkins' identity in ONE environment's namespace. A Jinja template, rendered by
+# playbooks/setup-app-env.yml for taskpluse-<env> ({{ app_namespace }}), never
+# cluster-wide: the staging token can't touch prod, and neither can touch
+# kube-system, traefik, cloudflared or the nodes.
+#
+# The Role lists exactly what `helm upgrade` of helm/taskpluse creates, plus
+# read access to Pods/ReplicaSets/events so a failed rollout can be explained.
+#
+# Trade-off: Helm stores each release in a Secret in the namespace, and RBAC
+# can't limit "create/list Secrets" to Helm's ones - so this account can also
+# read the app's Secrets (taskpluse-api, nexus-pull). That's the same data the
+# deployed app already has; it's why the token stays a Jenkins credential.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-deployer
+  namespace: {{ app_namespace }}
+---
+# A long-lived token for the account (Kubernetes fills in data.token and
+# data.ca.crt). To rotate it: delete this Secret and re-run the playbook.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-deployer-token
+  namespace: {{ app_namespace }}
+  annotations:
+    kubernetes.io/service-account.name: jenkins-deployer
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: taskpluse-deployer
+  namespace: {{ app_namespace }}
+rules:
+  # What the chart creates, and Helm's own release records (Secrets).
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services, serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Read-only: watch a rollout and see why it's stuck.
+  - apiGroups: [""]
+    resources: [pods, pods/log, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer
+  namespace: {{ app_namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: taskpluse-deployer
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-deployer
+    namespace: {{ app_namespace }}

@@ -5,6 +5,8 @@
 #   - the Kubernetes namespace
 #   - Secret nexus-pull      (image pulls, Nexus k8s-pull account)
 #   - Secret taskpluse-api   (DB_USERNAME, DB_PASSWORD, APP_JWT_SECRET)
+#   - Jenkins' deploy account (ServiceAccount + Role limited to this namespace)
+#     and its kubeconfig in infra/secrets/kubeconfig_<env> (git-ignored)
 # All values come from the vault. Safe to re-run.
 #
 #     ansible-playbook playbooks/setup-app-env.yml -e env=staging
@@ -20,6 +22,10 @@
     db_password: "{{ lookup('ansible.builtin.vars', 'vault_db_password_' ~ env) }}"
     jwt_secret: "{{ lookup('ansible.builtin.vars', 'vault_jwt_secret_' ~ env) }}"
     postgres_container: taskpluse-postgres
+    # The API server as Jenkins sees it: by container name on the kind Docker
+    # network (that name is on the API server's certificate).
+    jenkins_k8s_api: https://taskpluse-control-plane:6443
+    infra_secrets: "{{ playbook_dir }}/../infra/secrets"
   environment:
     KUBECONFIG: "{{ lookup('ansible.builtin.env', 'HOME') }}/.kube/taskpluse.conf"
 
@@ -124,8 +130,66 @@
       changed_when: true
       no_log: true
 
+    # ---- Jenkins' deploy access ----
+
+    - name: Create Jenkins' deploy account in {{ app_namespace }}
+      ansible.builtin.command:
+        cmd: kubectl apply -f -
+        stdin: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../cluster/rbac/jenkins-deployer.yaml.j2') }}"
+      register: rbac
+      changed_when: "'created' in rbac.stdout or 'configured' in rbac.stdout"
+
+    - name: Wait for Kubernetes to fill in the account's token
+      ansible.builtin.command: kubectl -n {{ app_namespace }} get secret jenkins-deployer-token -o jsonpath={.data.token}
+      register: deployer_token
+      until: deployer_token.stdout | length > 0
+      retries: 10
+      delay: 2
+      changed_when: false
+      no_log: true
+
+    - name: Read the cluster's CA certificate
+      ansible.builtin.command: kubectl -n {{ app_namespace }} get secret jenkins-deployer-token -o jsonpath={.data.ca\.crt}
+      register: deployer_ca
+      changed_when: false
+
+    - name: Make sure infra/secrets exists
+      ansible.builtin.file:
+        path: "{{ infra_secrets }}"
+        state: directory
+        mode: "0700"
+
+    # Jenkins gets this file as a credential (infra/compose.yaml -> casc.yaml).
+    # Rewritten only when the token or CA changed.
+    - name: Write Jenkins' kubeconfig for {{ env }}
+      ansible.builtin.copy:
+        dest: "{{ infra_secrets }}/kubeconfig_{{ env }}"
+        mode: "0600"
+        content: "{{ kubeconfig | to_nice_yaml }}"
+      vars:
+        kubeconfig:
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: kind-taskpluse
+              cluster:
+                server: "{{ jenkins_k8s_api }}"
+                certificate-authority-data: "{{ deployer_ca.stdout }}"
+          users:
+            - name: jenkins-deployer
+              user:
+                token: "{{ deployer_token.stdout | b64decode }}"
+          contexts:
+            - name: "{{ app_namespace }}"
+              context:
+                cluster: kind-taskpluse
+                user: jenkins-deployer
+                namespace: "{{ app_namespace }}"
+          current-context: "{{ app_namespace }}"
+      no_log: true
+
     - name: Show what the environment has
-      ansible.builtin.command: kubectl get namespace,secret -n {{ app_namespace }}
+      ansible.builtin.command: kubectl get namespace,secret,serviceaccount,rolebinding -n {{ app_namespace }}
       register: env_objects
       changed_when: false
 

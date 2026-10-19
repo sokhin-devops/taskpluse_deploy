@@ -20,8 +20,7 @@ spec:
       labels:
         {{- include "taskpluse.labels" (dict "root" . "component" "web" "version" .Values.web.image.tag) | nindent 8 }}
       annotations:
-        taskpluse.io/git-sha: {{ .Values.build.gitSha | quote }}
-        taskpluse.io/build-number: {{ .Values.build.number | quote }}
+        taskpluse.io/deployed-by: {{ .Values.deployedBy | quote }}
     spec:
       serviceAccountName: {{ include "taskpluse.fullname" . }}
       automountServiceAccountToken: false

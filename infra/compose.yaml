@@ -51,6 +51,10 @@ services:
     secrets:
       - jenkins_admin_password
       - nexus_push_password
+      # One kubeconfig per environment, each limited to its namespace
+      # (playbooks/setup-app-env.yml writes them).
+      - kubeconfig_staging
+      - kubeconfig_prod
     networks:
       kind:
         ipv4_address: 172.19.200.11
@@ -93,6 +97,10 @@ secrets:
     file: ./secrets/jenkins_admin_password
   nexus_push_password:
     file: ./secrets/nexus_push_password
+  kubeconfig_staging:
+    file: ./secrets/kubeconfig_staging
+  kubeconfig_prod:
+    file: ./secrets/kubeconfig_prod
 
 # The Docker network kind created for the cluster nodes.
 networks:

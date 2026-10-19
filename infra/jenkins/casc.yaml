@@ -31,6 +31,20 @@ credentials:
               description: Nexus jenkins-push account
               username: jenkins-push
               password: ${nexus_push_password}
+          # Deploy access, one per environment: a kubeconfig whose token can
+          # only manage its own namespace (cluster/rbac/jenkins-deployer.yaml.j2).
+          - file:
+              scope: GLOBAL
+              id: kubeconfig-staging
+              description: taskpluse-staging deployer (namespace-only)
+              fileName: kubeconfig
+              secretBytes: ${readFileBase64:/run/secrets/kubeconfig_staging}
+          - file:
+              scope: GLOBAL
+              id: kubeconfig-prod
+              description: taskpluse-prod deployer (namespace-only)
+              fileName: kubeconfig
+              secretBytes: ${readFileBase64:/run/secrets/kubeconfig_prod}
 
 # Pipeline jobs, defined here instead of clicked together (Job DSL). Each one
 # runs the Jenkinsfile from its repository's main branch. GitHub can't reach a
@@ -38,7 +52,7 @@ credentials:
 # One job per app, same shape. String concatenation instead of Groovy "${...}":
 # JCasC would try to fill ${...} in itself.
 jobs:
-  - script: >
+  - script: |
       ['api': 'TaskPluse API', 'web': 'TaskPluse Web'].each { app, title ->
         pipelineJob('taskpluse-' + app) {
           description(title + ': test, scan, build, push to Nexus. Jenkinsfile in sokhin-devops/taskpluse_' + app + '.')
@@ -59,6 +73,28 @@ jobs:
               }
               scriptPath('Jenkinsfile')
             }
+          }
+        }
+      }
+
+      // CD: deploys one app's image to staging, smoke-tests it, waits for a
+      // person to approve, then deploys the same image to prod. Started by the
+      // CI jobs above after a successful push (or by hand: Build with Parameters).
+      pipelineJob('taskpluse-deploy') {
+        description('TaskPluse CD: staging -> smoke test -> approval -> prod. Jenkinsfile in sokhin-devops/taskpluse_deploy.')
+        parameters {
+          choiceParam('APP', ['api', 'web'], 'Which app to deploy')
+          stringParam('TAG', '', 'Image tag pushed by the CI job, e.g. 6-32fa074')
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/sokhin-devops/taskpluse_deploy.git') }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
           }
         }
       }

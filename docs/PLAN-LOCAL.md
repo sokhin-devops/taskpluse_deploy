@@ -68,7 +68,8 @@ WORKSTATION (Windows 11 + WSL2 + Docker, 40 GB RAM)
 | 8 | Nexus registry: push from workstation, pull from cluster | ✅ done 2026-10-19: push as `jenkins-push` to `localhost:5001`, pull with an imagePullSecret as `k8s-pull`, pull without a login refused |
 | 9 | Helm chart for TaskPluse | ✅ done 2026-10-19: `helm/taskpluse` installed into `taskpluse-staging` (API 0.1.0-7414011, web 0.1.0-201e17c), all checks through the Ingress pass |
 | 10 | Public HTTPS via Cloudflare Tunnel; production environment | ✅ done 2026-10-19: https://taskpluse-staging.sokhin.site and https://taskpluse.sokhin.site (prod: 2 API + 2 web spread over both workers), same images in both |
-| **11–13** | **Jenkins CI, push to Nexus, deploy with Helm** | ⬜ next |
+| 11 | Jenkins CI (JCasC), push to Nexus | ✅ done 2026-10-19: jobs `taskpluse-api` (#6, `6-32fa074`) and `taskpluse-web` (#1, `1-57032c6`) green — Gitleaks, unit tests, Trivy deps + image, push |
+| **12–13** | **Deploy with Helm from Jenkins: staging → smoke test → approval → prod** | ⬜ next |
 | 14 | Production with approval | ⬜ (environment exists; the approval gate comes with the pipeline) |
 | 15 | Rollback | ⬜ |
 | 16 | Database backup and tested restore | ⬜ |

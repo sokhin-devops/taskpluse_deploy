@@ -9,11 +9,10 @@ imageRegistry: localhost:5001
 imagePullSecrets:
   - name: nexus-pull
 
-# Which build is running. Jenkins sets these at deploy time; they end up as Pod
-# annotations, so `kubectl describe` shows the commit behind every Pod.
-build:
-  gitSha: unknown
-  number: manual
+# Who rolled this release out, e.g. "jenkins taskpluse-deploy #12" - a Pod
+# annotation, next to the image tag (BUILD-SHA) in the `version` label, so
+# `kubectl describe pod` shows both which build runs and which deploy put it there.
+deployedBy: manual
 
 api:
   image:

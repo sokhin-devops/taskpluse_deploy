@@ -40,6 +40,17 @@ for pair in "jenkins_admin_password:vault_jenkins_admin_password" \
     (umask 077 && printf '%s' "$value" > "$file")
 done
 
+# Jenkins' kubeconfigs are written by playbooks/setup-app-env.yml, which needs
+# the cluster and database first. Until then a placeholder keeps Compose happy
+# (it refuses to start with a missing secret file); deploys fail clearly.
+for env in staging prod; do
+    file="infra/secrets/kubeconfig_${env}"
+    if [ ! -s "$file" ]; then
+        (umask 077 && echo "# placeholder - run: ansible-playbook playbooks/setup-app-env.yml -e env=${env}" > "$file")
+        echo "No Jenkins kubeconfig for ${env} yet - run setup-app-env.yml -e env=${env}, then this script again"
+    fi
+done
+
 # The group that owns the Docker socket, as seen inside containers - Jenkins is
 # added to it instead of running as root.
 DOCKER_GID="$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock alpine:3.22 stat -c %g /var/run/docker.sock)"
