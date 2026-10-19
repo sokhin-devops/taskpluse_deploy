@@ -1,0 +1,11 @@
+# Production: two of each, spread over both workers, so a rolling update or a
+# lost node never takes the app down. No Swagger.
+api:
+  replicas: 2
+web:
+  replicas: 2
+database:
+  name: taskpluse_prod
+ingress:
+  hosts:
+    - taskpluse.localhost

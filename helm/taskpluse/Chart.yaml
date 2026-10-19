@@ -1,0 +1,9 @@
+apiVersion: v2
+name: taskpluse
+description: TaskPluse - Angular web app and Spring Boot API, routed through one hostname.
+type: application
+# The chart's own version: bump it when the templates change.
+version: 0.1.0
+# The application version is the image tag, chosen per deployment
+# (--set api.image.tag=... --set web.image.tag=...), so it isn't fixed here.
+appVersion: "per-deployment"

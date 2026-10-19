@@ -1,0 +1,13 @@
+# Non-secret API settings, handed to the container as environment variables.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "taskpluse.fullname" . }}-api
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "api" "version" .Values.api.image.tag) | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.api.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  # The database by its in-cluster name (database.yaml).
+  DB_URL: {{ printf "jdbc:postgresql://%s-db:%v/%s" (include "taskpluse.fullname" .) .Values.database.port (required "database.name is required" .Values.database.name) | quote }}

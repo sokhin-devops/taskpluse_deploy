@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taskpluse.fullname" . }}-web
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "web" "version" .Values.web.image.tag) | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "taskpluse.selectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "taskpluse.labels" (dict "root" . "component" "web" "version" .Values.web.image.tag) | nindent 8 }}
+      annotations:
+        taskpluse.io/git-sha: {{ .Values.build.gitSha | quote }}
+        taskpluse.io/build-number: {{ .Values.build.number | quote }}
+    spec:
+      serviceAccountName: {{ include "taskpluse.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "taskpluse.selectorLabels" (dict "root" . "component" "web") | nindent 14 }}
+      containers:
+        - name: web
+          image: "{{ .Values.imageRegistry }}/{{ .Values.web.image.repository }}:{{ required "web.image.tag is required" .Values.web.image.tag }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+          # nginx's own health page (taskpluse_web/nginx/default.conf).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # nginx-unprivileged keeps its pid file and buffers in /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

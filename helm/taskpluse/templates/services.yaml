@@ -1,0 +1,18 @@
+# One stable address in front of each component's Pods.
+{{- range $component := list "api" "web" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskpluse.fullname" $ }}-{{ $component }}
+  labels:
+    {{- include "taskpluse.labels" (dict "root" $ "component" $component "version" (index $.Values $component "image" "tag")) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "taskpluse.selectorLabels" (dict "root" $ "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}

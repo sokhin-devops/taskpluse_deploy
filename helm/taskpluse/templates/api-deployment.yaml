@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taskpluse.fullname" . }}-api
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "api" "version" .Values.api.image.tag) | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  # Old ReplicaSets kept for `kubectl rollout undo`; Helm keeps its own history too.
+  revisionHistoryLimit: 5
+  # Never fewer Pods than wanted during an update: start one new, wait until it
+  # is Ready, then remove one old (the Phase 6 rollback drill).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "taskpluse.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "taskpluse.labels" (dict "root" . "component" "api" "version" .Values.api.image.tag) | nindent 8 }}
+      annotations:
+        # Changes whenever the ConfigMap does, so a config change rolls the Pods
+        # (environment variables are only read at container start).
+        checksum/config: {{ include (print $.Template.BasePath "/api-configmap.yaml") . | sha256sum }}
+        taskpluse.io/git-sha: {{ .Values.build.gitSha | quote }}
+        taskpluse.io/build-number: {{ .Values.build.number | quote }}
+    spec:
+      serviceAccountName: {{ include "taskpluse.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      # Prefer one Pod per node, so losing a node never takes every copy.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "taskpluse.selectorLabels" (dict "root" . "component" "api") | nindent 14 }}
+      containers:
+        - name: api
+          image: "{{ .Values.imageRegistry }}/{{ .Values.api.image.repository }}:{{ required "api.image.tag is required" .Values.api.image.tag }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "taskpluse.fullname" . }}-api
+            - secretRef:
+                name: {{ .Values.api.existingSecret }}
+          # Spring Boot needs 20-60 s to start; until this passes, the other two
+          # probes don't run - so a slow start isn't mistaken for a hang.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          # Process only, never the database: a database outage must not make
+          # Kubernetes restart every API Pod (Phase 7).
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          # Includes the database: without it, the Pod is taken out of traffic
+          # until it can reach the database again.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # The only writable place: Tomcat's temporary files.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

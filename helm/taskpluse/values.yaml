@@ -1,0 +1,63 @@
+# Defaults for every environment. values-staging.yaml and values-prod.yaml hold
+# only what differs. Nothing secret belongs in any values file: secrets live in
+# Kubernetes Secrets created from the vault, and are only referenced here.
+
+# Where images come from: Nexus. The same name works on this PC (push) and
+# inside the cluster (pull) - see cluster/kind/registry-hosts.toml.
+imageRegistry: localhost:5001
+# Created per namespace from the vault (k8s-pull account), not by this chart.
+imagePullSecrets:
+  - name: nexus-pull
+
+# Which build is running. Jenkins sets these at deploy time; they end up as Pod
+# annotations, so `kubectl describe` shows the commit behind every Pod.
+build:
+  gitSha: unknown
+  number: manual
+
+api:
+  image:
+    repository: taskpluse-api
+    tag: ""            # required at deploy time: --set api.image.tag=<tag>
+  replicas: 1
+  port: 8082
+  # Memory limit only: a CPU limit throttles the JVM, especially at start-up.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 768Mi
+  # Non-secret settings -> ConfigMap -> environment variables.
+  config:
+    SPRINGDOC_ENABLED: "false"
+    DB_POOL_SIZE: "10"
+  # Secret with DB_USERNAME, DB_PASSWORD and APP_JWT_SECRET, created outside
+  # the chart from the vault.
+  existingSecret: taskpluse-api
+
+web:
+  image:
+    repository: taskpluse-web
+    tag: ""            # required at deploy time: --set web.image.tag=<tag>
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+# PostgreSQL runs outside the cluster (infra/compose.yaml). The chart gives it a
+# name inside the cluster, <release>-db, so the API connects by name.
+database:
+  address: 172.19.200.12
+  port: 5432
+  name: ""             # required: set per environment
+
+ingress:
+  className: traefik
+  hosts: []            # set per environment
+  # API paths routed besides /api - e.g. Swagger in staging. /actuator never is.
+  extraApiPaths: []

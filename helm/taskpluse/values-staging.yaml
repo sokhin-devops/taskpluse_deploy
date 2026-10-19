@@ -1,0 +1,18 @@
+# Staging: one of each, Swagger reachable for testing the API by hand.
+api:
+  replicas: 1
+  config:
+    SPRINGDOC_ENABLED: "true"
+    DB_POOL_SIZE: "10"
+web:
+  replicas: 1
+database:
+  name: taskpluse_staging
+ingress:
+  # *.localhost always means this PC, in browsers and curl. Public hostnames
+  # through the Cloudflare Tunnel are added in Phase 10.
+  hosts:
+    - taskpluse-staging.localhost
+  extraApiPaths:
+    - /swagger-ui
+    - /v3/api-docs

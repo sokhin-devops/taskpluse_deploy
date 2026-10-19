@@ -1,0 +1,33 @@
+# One hostname for the whole app: the browser calls /api on the same host that
+# served the page (apiBaseUrl '' in the web build), so there is no CORS.
+# /actuator is deliberately never routed - health and metrics stay internal.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "taskpluse.fullname" . }}
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "ingress" "version" .Values.web.image.tag) | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    {{- range $host := required "ingress.hosts needs at least one host" .Values.ingress.hosts }}
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          {{- range $path := prepend $.Values.ingress.extraApiPaths "/api" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "taskpluse.fullname" $ }}-api
+                port:
+                  name: http
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "taskpluse.fullname" $ }}-web
+                port:
+                  name: http
+    {{- end }}

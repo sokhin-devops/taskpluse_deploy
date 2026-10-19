@@ -1,0 +1,134 @@
+---
+# Prepares one TaskPluse environment for the Helm chart - everything the chart
+# references but deliberately doesn't contain:
+#   - a PostgreSQL database and user (in the infra container)
+#   - the Kubernetes namespace
+#   - Secret nexus-pull      (image pulls, Nexus k8s-pull account)
+#   - Secret taskpluse-api   (DB_USERNAME, DB_PASSWORD, APP_JWT_SECRET)
+# All values come from the vault. Safe to re-run.
+#
+#     ansible-playbook playbooks/setup-app-env.yml -e env=staging
+#     ansible-playbook playbooks/setup-app-env.yml -e env=prod
+
+- name: Prepare a TaskPluse environment (-e env=staging|prod)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    app_namespace: "taskpluse-{{ env }}"
+    db_name: "taskpluse_{{ env }}"
+    db_user: "taskpluse_{{ env }}"
+    db_password: "{{ lookup('ansible.builtin.vars', 'vault_db_password_' ~ env) }}"
+    jwt_secret: "{{ lookup('ansible.builtin.vars', 'vault_jwt_secret_' ~ env) }}"
+    postgres_container: taskpluse-postgres
+  environment:
+    KUBECONFIG: "{{ lookup('ansible.builtin.env', 'HOME') }}/.kube/taskpluse.conf"
+
+  tasks:
+    - name: Only staging and prod exist
+      ansible.builtin.assert:
+        that: env in ['staging', 'prod']
+        fail_msg: "Run with -e env=staging or -e env=prod"
+        quiet: true
+
+    # ---- database ----
+
+    # Through stdin, never the command line: a password in a command line is
+    # visible to anyone who can list processes. The SQL only creates what's
+    # missing and always (re)sets the password, so the vault stays the truth.
+    - name: Create the {{ db_user }} user
+      ansible.builtin.command:
+        cmd: docker exec -i {{ postgres_container }} psql -U postgres -v ON_ERROR_STOP=1 -q
+        stdin: |
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ db_user }}') THEN
+              CREATE ROLE {{ db_user }} LOGIN;
+            END IF;
+          END $$;
+          ALTER ROLE {{ db_user }} WITH LOGIN PASSWORD '{{ db_password }}';
+      no_log: true
+      changed_when: false
+
+    - name: Check whether the {{ db_name }} database exists
+      ansible.builtin.command:
+        cmd: >-
+          docker exec {{ postgres_container }} psql -U postgres -tAc
+          "SELECT 1 FROM pg_database WHERE datname = '{{ db_name }}'"
+      register: db_exists
+      changed_when: false
+
+    # Owned by the app's user, so Hibernate can create and change its tables.
+    - name: Create the {{ db_name }} database
+      ansible.builtin.command: >-
+        docker exec {{ postgres_container }} psql -U postgres -v ON_ERROR_STOP=1
+        -c "CREATE DATABASE {{ db_name }} OWNER {{ db_user }}"
+      when: db_exists.stdout | trim != "1"
+      changed_when: true
+
+    # ---- Kubernetes ----
+
+    # `create --dry-run=client -o yaml | apply` turns kubectl's create commands
+    # into "create or update", and keeps secret values off the command line.
+    - name: Create the {{ app_namespace }} namespace
+      ansible.builtin.shell: >-
+        kubectl create namespace {{ app_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+      register: ns
+      changed_when: "'unchanged' not in ns.stdout"
+
+    # Secrets are applied --server-side: a plain `kubectl apply` stores a copy of
+    # the whole object in an annotation (last-applied-configuration), which for
+    # a Secret would hold the password in readable form. `kubectl diff` first
+    # (it masks Secret values) so a re-run reports changed only when it changed.
+    - name: Define the environment's Secrets
+      ansible.builtin.set_fact:
+        env_secrets:
+          - name: nexus-pull
+            manifest:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: nexus-pull
+              type: kubernetes.io/dockerconfigjson
+              data:
+                .dockerconfigjson: "{{ {'auths': {'localhost:5001': {'username': nexus_pull_user, 'password': nexus_pull_password, 'auth': (nexus_pull_user ~ ':' ~ nexus_pull_password) | b64encode}}} | to_json | b64encode }}"
+          - name: taskpluse-api
+            manifest:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: taskpluse-api
+              type: Opaque
+              data:
+                DB_USERNAME: "{{ db_user | b64encode }}"
+                DB_PASSWORD: "{{ db_password | b64encode }}"
+                APP_JWT_SECRET: "{{ jwt_secret | b64encode }}"
+      no_log: true
+
+    - name: Compare each Secret with the cluster
+      ansible.builtin.command:
+        cmd: kubectl diff --server-side -n {{ app_namespace }} -f -
+        stdin: "{{ item.manifest | to_json }}"
+      loop: "{{ env_secrets }}"
+      register: secret_diff
+      # 0 = same, 1 = differs or missing, anything else = error
+      failed_when: secret_diff.rc > 1
+      changed_when: false
+      no_log: true
+
+    - name: Create or update the Secrets that differ
+      ansible.builtin.command:
+        cmd: kubectl apply --server-side --field-manager=setup-app-env -n {{ app_namespace }} -f -
+        stdin: "{{ item.item.manifest | to_json }}"
+      loop: "{{ secret_diff.results }}"
+      when: item.rc == 1
+      changed_when: true
+      no_log: true
+
+    - name: Show what the environment has
+      ansible.builtin.command: kubectl get namespace,secret -n {{ app_namespace }}
+      register: env_objects
+      changed_when: false
+
+    - name: Environment ready
+      ansible.builtin.debug:
+        var: env_objects.stdout_lines

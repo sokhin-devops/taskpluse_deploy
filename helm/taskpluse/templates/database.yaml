@@ -1,0 +1,36 @@
+# PostgreSQL runs outside the cluster. A Service with no selector plus a
+# hand-written EndpointSlice gives it an in-cluster name (<release>-db) that
+# points at its real address - so the API config says "<release>-db:5432", and
+# moving the database later means changing one value, not the app.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskpluse.fullname" . }}-db
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "database" "version" "external") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: {{ .Values.database.port }}
+      targetPort: {{ .Values.database.port }}
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: {{ include "taskpluse.fullname" . }}-db
+  labels:
+    {{- include "taskpluse.labels" (dict "root" . "component" "database" "version" "external") | nindent 4 }}
+    # Links this slice to the Service above.
+    kubernetes.io/service-name: {{ include "taskpluse.fullname" . }}-db
+    # Anything but Kubernetes' own controller name, so it leaves this slice alone.
+    endpointslice.kubernetes.io/managed-by: helm
+addressType: IPv4
+ports:
+  - name: postgres
+    port: {{ .Values.database.port }}
+    protocol: TCP
+endpoints:
+  - addresses:
+      - {{ .Values.database.address | quote }}
