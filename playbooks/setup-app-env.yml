@@ -148,10 +148,14 @@
       changed_when: false
       no_log: true
 
+    # argv, not a command line: Ansible splits a command line like a shell
+    # would and eats the backslash in ca\.crt - kubectl then returns nothing.
     - name: Read the cluster's CA certificate
-      ansible.builtin.command: kubectl -n {{ app_namespace }} get secret jenkins-deployer-token -o jsonpath={.data.ca\.crt}
+      ansible.builtin.command:
+        argv: [kubectl, -n, "{{ app_namespace }}", get, secret, jenkins-deployer-token, -o, 'jsonpath={.data.ca\.crt}']
       register: deployer_ca
       changed_when: false
+      failed_when: deployer_ca.rc != 0 or deployer_ca.stdout | length == 0
 
     - name: Make sure infra/secrets exists
       ansible.builtin.file:

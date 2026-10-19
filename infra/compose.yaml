@@ -48,6 +48,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # The configuration as code, read at every start.
       - ./jenkins/casc.yaml:/var/jenkins_home/casc.yaml:ro
+      # Re-applies casc.yaml after jobs are loaded, so new jobs appear at once.
+      - ./jenkins/init.groovy.d/reapply-casc.groovy:/var/jenkins_home/init.groovy.d/reapply-casc.groovy:ro
     secrets:
       - jenkins_admin_password
       - nexus_push_password
