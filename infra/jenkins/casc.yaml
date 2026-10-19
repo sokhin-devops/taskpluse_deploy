@@ -1,0 +1,60 @@
+# Jenkins configuration as code (JCasC). Applied at every start, so this file -
+# not clicks in the UI - is the truth. Values like ${jenkins_admin_password} are
+# read from Docker secrets (/run/secrets/<name>), which scripts/infra-up.sh
+# writes from the vault.
+jenkins:
+  systemMessage: "TaskPluse CI/CD - configured from git (taskpluse_deploy/infra/jenkins/casc.yaml)"
+  numExecutors: 2
+  # Nobody signs up; the one admin's password comes from the vault.
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: ${jenkins_admin_password}
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+unclassified:
+  location:
+    url: http://localhost:8090/
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # Pushes images to Nexus (localhost:5001) - push-only account.
+          - usernamePassword:
+              scope: GLOBAL
+              id: nexus-push
+              description: Nexus jenkins-push account
+              username: jenkins-push
+              password: ${nexus_push_password}
+
+# Pipeline jobs, defined here instead of clicked together (Job DSL). Each one
+# runs the Jenkinsfile from its repository's main branch. GitHub can't reach a
+# Jenkins on this PC, so Jenkins checks for new commits every 5 minutes instead.
+jobs:
+  - script: >
+      pipelineJob('taskpluse-api') {
+        description('TaskPluse API: test, scan, build, push to Nexus. Jenkinsfile in sokhin-devops/taskpluse_api.')
+        properties {
+          pipelineTriggers {
+            triggers {
+              pollSCM { scmpoll_spec('H/5 * * * *') }
+            }
+          }
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('https://github.com/sokhin-devops/taskpluse_api.git') }
+                branch('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+          }
+        }
+      }

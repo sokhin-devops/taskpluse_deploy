@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Adds TaskPluse's per-environment secrets to the vault - database password and
-# JWT signing key for staging and prod - generating any that are missing.
+# Adds TaskPluse's generated secrets to the vault - the Jenkins admin password,
+# and the database password and JWT signing key for staging and prod - creating
+# any that are missing.
 # Existing values are kept. Run from the repo root after `source scripts/session.sh`:
 #     bash scripts/vault-add-app-secrets.sh
 #
@@ -17,19 +18,19 @@ random() { openssl rand -base64 "$1" | tr -dc 'A-Za-z0-9' | cut -c1-"$2"; }
 current="$(ansible-vault view "$vault")"
 added=()
 additions=""
-for env in staging prod; do
-    for key in "vault_db_password_${env}" "vault_jwt_secret_${env}"; do
-        if grep -q "^${key}:" <<<"$current"; then
-            continue
-        fi
-        case "$key" in
-            vault_db_password_*) value="$(random 48 32)" ;;
-            # The API needs at least 32 characters (256 bits for HS256).
-            vault_jwt_secret_*)  value="$(random 96 64)" ;;
-        esac
-        additions+="${key}: \"${value}\""$'\n'
-        added+=("$key")
-    done
+for key in vault_jenkins_admin_password \
+           vault_db_password_staging vault_jwt_secret_staging \
+           vault_db_password_prod vault_jwt_secret_prod; do
+    if grep -q "^${key}:" <<<"$current"; then
+        continue
+    fi
+    case "$key" in
+        # The API needs at least 32 characters (256 bits for HS256).
+        vault_jwt_secret_*) value="$(random 96 64)" ;;
+        *)                  value="$(random 48 32)" ;;
+    esac
+    additions+="${key}: \"${value}\""$'\n'
+    added+=("$key")
 done
 
 if [ "${#added[@]}" -eq 0 ]; then

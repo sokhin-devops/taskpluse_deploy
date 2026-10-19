@@ -4,8 +4,8 @@
 # They join kind's Docker network at fixed addresses far from the nodes
 # (172.19.0.x), so the cluster can always find them:
 #   172.19.200.10  Nexus       registry: push to localhost:5001 from this PC
+#   172.19.200.11  Jenkins     CI/CD: UI at http://localhost:8090 from this PC
 #   172.19.200.12  PostgreSQL  database: outside Kubernetes for safe persistence
-# Jenkins joins in Phase 11.
 name: taskpluse-infra
 
 services:
@@ -29,6 +29,31 @@ services:
     networks:
       kind:
         ipv4_address: 172.19.200.10
+
+  jenkins:
+    build: ./jenkins
+    image: taskpluse-jenkins:2.580.1
+    container_name: taskpluse-jenkins
+    restart: unless-stopped
+    # Builds and pushes images with this PC's Docker through its socket. That
+    # gives Jenkins full control of Docker here - acceptable on a one-person
+    # lab, never on a shared machine. The socket belongs to group DOCKER_GID,
+    # which scripts/infra-up.sh reads and passes in, so Jenkins doesn't need root.
+    group_add:
+      - "${DOCKER_GID:?run scripts/infra-up.sh}"
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The configuration as code, read at every start.
+      - ./jenkins/casc.yaml:/var/jenkins_home/casc.yaml:ro
+    secrets:
+      - jenkins_admin_password
+      - nexus_push_password
+    networks:
+      kind:
+        ipv4_address: 172.19.200.11
 
   postgres:
     image: postgres:18.6-alpine
@@ -58,11 +83,16 @@ services:
 volumes:
   nexus-data:
   postgres-data:
+  jenkins-home:
 
-# Created by scripts/infra-up.sh; git-ignored.
+# Created by scripts/infra-up.sh (from the vault, or generated); git-ignored.
 secrets:
   postgres_admin_password:
     file: ./secrets/postgres_admin_password
+  jenkins_admin_password:
+    file: ./secrets/jenkins_admin_password
+  nexus_push_password:
+    file: ./secrets/nexus_push_password
 
 # The Docker network kind created for the cluster nodes.
 networks:
