@@ -9,3 +9,4 @@ database:
 ingress:
   hosts:
     - taskpluse.localhost
+    - taskpluse.sokhin.site

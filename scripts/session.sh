@@ -36,5 +36,14 @@ if [ -f "$HOME/.kube/taskpluse.conf" ]; then
     echo "KUBECONFIG=$KUBECONFIG"
 fi
 
+# Docker Desktop has its own Kubernetes; a shell without this session talks to
+# that one instead. Say which cluster kubectl and helm will act on.
+context="$(kubectl config current-context 2>/dev/null || echo none)"
+if [ "$context" = "kind-taskpluse" ]; then
+    echo "kubectl context: $context"
+else
+    echo "WARNING: kubectl context is '$context', not kind-taskpluse - commands would go to the wrong cluster" >&2
+fi
+
 echo "ANSIBLE_CONFIG=$ANSIBLE_CONFIG"
 ssh-add -l | grep "taskpluse-vultr-admin"

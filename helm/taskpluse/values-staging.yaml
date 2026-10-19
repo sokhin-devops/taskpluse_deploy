@@ -9,10 +9,11 @@ web:
 database:
   name: taskpluse_staging
 ingress:
-  # *.localhost always means this PC, in browsers and curl. Public hostnames
-  # through the Cloudflare Tunnel are added in Phase 10.
+  # *.localhost always means this PC, in browsers and curl. The .sokhin.site
+  # name is public, through the Cloudflare Tunnel (cluster/cloudflared/).
   hosts:
     - taskpluse-staging.localhost
+    - taskpluse-staging.sokhin.site
   extraApiPaths:
     - /swagger-ui
     - /v3/api-docs

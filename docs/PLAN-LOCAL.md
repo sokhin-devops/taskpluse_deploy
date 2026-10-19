@@ -67,9 +67,9 @@ WORKSTATION (Windows 11 + WSL2 + Docker, 40 GB RAM)
 | L2 | Infra in Compose: Nexus, PostgreSQL (Jenkins joins in Phase 11) | ✅ done 2026-10-19 (`scripts/infra-up.sh`, fixed addresses 172.19.200.10/.12) |
 | 8 | Nexus registry: push from workstation, pull from cluster | ✅ done 2026-10-19: push as `jenkins-push` to `localhost:5001`, pull with an imagePullSecret as `k8s-pull`, pull without a login refused |
 | 9 | Helm chart for TaskPluse | ✅ done 2026-10-19: `helm/taskpluse` installed into `taskpluse-staging` (API 0.1.0-7414011, web 0.1.0-201e17c), all checks through the Ingress pass |
-| **10** | **Staging public: Cloudflare Tunnel, HTTPS; production environment** | ⬜ next (database, namespace and secrets already scripted: `playbooks/setup-app-env.yml`) |
-| 11–13 | Jenkins CI, push to Nexus, deploy with Helm | ⬜ |
-| 14 | Production with approval | ⬜ |
+| 10 | Public HTTPS via Cloudflare Tunnel; production environment | ✅ done 2026-10-19: https://taskpluse-staging.sokhin.site and https://taskpluse.sokhin.site (prod: 2 API + 2 web spread over both workers), same images in both |
+| **11–13** | **Jenkins CI, push to Nexus, deploy with Helm** | ⬜ next |
+| 14 | Production with approval | ⬜ (environment exists; the approval gate comes with the pipeline) |
 | 15 | Rollback | ⬜ |
 | 16 | Database backup and tested restore | ⬜ |
 | 17 | Security: Gitleaks, Trivy, dependency scan, RBAC, NetworkPolicy | ⬜ |
