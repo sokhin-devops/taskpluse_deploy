@@ -1,0 +1,70 @@
+# Services that run NEXT TO the Kubernetes cluster, not in it - like separate
+# servers on the same private network. Start with:  bash scripts/infra-up.sh
+#
+# They join kind's Docker network at fixed addresses far from the nodes
+# (172.19.0.x), so the cluster can always find them:
+#   172.19.200.10  Nexus       registry: push to localhost:5001 from this PC
+#   172.19.200.12  PostgreSQL  database: outside Kubernetes for safe persistence
+# Jenkins joins in Phase 11.
+name: taskpluse-infra
+
+services:
+  nexus:
+    # Same version and memory sizing as roles/nexus on the Vultr registry-vm.
+    image: sonatype/nexus3:3.96.4
+    container_name: taskpluse-nexus
+    restart: unless-stopped
+    environment:
+      INSTALL4J_ADD_VM_PARAMS: >-
+        -Xms1200m -Xmx1200m -XX:MaxDirectMemorySize=1g
+        -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+    # This PC only (127.0.0.1): 8081 = web UI and REST API, 5001 = the Docker
+    # repository. Docker allows plain HTTP to localhost registries, so pushes
+    # from here need no TLS setup.
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:5001:8082"
+    volumes:
+      - nexus-data:/nexus-data
+    networks:
+      kind:
+        ipv4_address: 172.19.200.10
+
+  postgres:
+    image: postgres:18.6-alpine
+    container_name: taskpluse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      # Read from a file, so the password isn't visible in `docker inspect`.
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+    secrets:
+      - postgres_admin_password
+    # PostgreSQL 18 images keep their data under /var/lib/postgresql/18/...;
+    # mounting the parent keeps it in the volume across upgrades.
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      kind:
+        ipv4_address: 172.19.200.12
+
+# Named volumes: the data survives `docker compose down` and container rebuilds.
+# Only `docker compose down -v` deletes it - never run that without a backup.
+volumes:
+  nexus-data:
+  postgres-data:
+
+# Created by scripts/infra-up.sh; git-ignored.
+secrets:
+  postgres_admin_password:
+    file: ./secrets/postgres_admin_password
+
+# The Docker network kind created for the cluster nodes.
+networks:
+  kind:
+    external: true

@@ -64,9 +64,9 @@ WORKSTATION (Windows 11 + WSL2 + Docker, 40 GB RAM)
 | 6 | Kubernetes by hand + Traefik | ✅ done |
 | 7 | Docker images | ✅ done |
 | L1 | kind cluster: 3 nodes, Calico, Traefik | ✅ done 2026-10-19 (k8s 1.36.4, Calico 3.32.2, Traefik 3.7.13; `127.0.0.1:80` → Traefik) |
-| **L2** | **Infra in Compose: Nexus, Jenkins, PostgreSQL** | ⬜ next |
-| 8 | Nexus registry: push from workstation, pull from cluster | 🟡 role written on Vultr → finish locally (licence decision pending) |
-| 9 | Helm chart for TaskPluse | ⬜ |
+| L2 | Infra in Compose: Nexus, PostgreSQL (Jenkins joins in Phase 11) | ✅ done 2026-10-19 (`scripts/infra-up.sh`, fixed addresses 172.19.200.10/.12) |
+| 8 | Nexus registry: push from workstation, pull from cluster | ✅ done 2026-10-19: push as `jenkins-push` to `localhost:5001`, pull with an imagePullSecret as `k8s-pull`, pull without a login refused |
+| **9** | **Helm chart for TaskPluse** | ⬜ next |
 | 10 | Staging: database, Cloudflare Tunnel, public HTTPS | ⬜ |
 | 11–13 | Jenkins CI, push to Nexus, deploy with Helm | ⬜ |
 | 14 | Production with approval | ⬜ |

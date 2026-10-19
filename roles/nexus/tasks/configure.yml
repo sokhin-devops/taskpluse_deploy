@@ -1,45 +1,9 @@
 ---
-# Everything below goes through Nexus's REST API as admin. Each setting is read
-# first and changed only if it differs, so a re-run reports changed=0.
-
-# ---- admin password -----------------------------------------------------------
-
-# On first start Nexus writes a random admin password to this file.
-- name: Look for the one-time admin password from first start
-  ansible.builtin.stat:
-    path: "{{ nexus_data_dir }}/admin.password"
-  register: nexus_initial_password_file
-
-- name: Replace the generated admin password with the vault's
-  when: nexus_initial_password_file.stat.exists
-  block:
-    - name: Read the generated admin password
-      ansible.builtin.slurp:
-        src: "{{ nexus_data_dir }}/admin.password"
-      register: nexus_initial_password
-      no_log: true
-
-    - name: Set the admin password from the vault
-      ansible.builtin.uri:
-        url: "{{ nexus_api }}/security/users/admin/change-password"
-        method: PUT
-        user: admin
-        password: "{{ nexus_initial_password.content | b64decode | trim }}"
-        force_basic_auth: true
-        headers:
-          Content-Type: text/plain
-        body: "{{ nexus_admin_password }}"
-        status_code: 204
-      no_log: true
-      changed_when: true
-
-    # Its job is done. Left behind it would look like a valid admin password.
-    - name: Delete the generated admin password file
-      ansible.builtin.file:
-        path: "{{ nexus_data_dir }}/admin.password"
-        state: absent
-
-# ---- everything else, as admin -----------------------------------------------
+# Everything here goes through Nexus's REST API as admin, so it works the same
+# for Nexus on a server or in a local container - only nexus_api must reach it.
+# Each setting is read first and changed only if it differs, so a re-run
+# reports changed=0. Expects the admin password to already be the vault's
+# (admin-password.yml, or the local playbook's equivalent).
 
 - name: Configure Nexus
   module_defaults:

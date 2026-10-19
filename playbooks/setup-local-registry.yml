@@ -1,0 +1,60 @@
+---
+# Configures the local Nexus (infra/compose.yaml) as the Docker registry - the
+# same settings as on the Vultr registry-vm, through the same API tasks
+# (roles/nexus/tasks/configure.yml). Run after scripts/infra-up.sh:
+#     ansible-playbook playbooks/setup-local-registry.yml
+# Needs the vault and nexus_accept_community_eula in inventory/group_vars/registry.yml.
+# Safe to re-run.
+
+- name: Configure the local Nexus registry
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../inventory/group_vars/registry.yml
+  vars:
+    nexus_container: taskpluse-nexus
+
+  tasks:
+    # First start takes a few minutes (database creation, plugin start-up).
+    - name: Wait until Nexus is ready
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/service/rest/v1/status/writable
+        status_code: 200
+      register: nexus_status
+      retries: 60
+      delay: 10
+      until: nexus_status.status == 200
+
+    # The data lives in a Docker volume, so the file is read from inside the
+    # container. It only exists until the password has been changed once.
+    - name: Read the one-time admin password, if Nexus still has it
+      ansible.builtin.command: docker exec {{ nexus_container }} cat /nexus-data/admin.password
+      register: nexus_initial_password
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Set the admin password from the vault
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/service/rest/v1/security/users/admin/change-password
+        method: PUT
+        user: admin
+        password: "{{ nexus_initial_password.stdout | trim }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: text/plain
+        body: "{{ nexus_admin_password }}"
+        status_code: 204
+      when: nexus_initial_password.rc == 0
+      no_log: true
+      changed_when: true
+
+    - name: Delete the one-time admin password file
+      ansible.builtin.command: docker exec {{ nexus_container }} rm -f /nexus-data/admin.password
+      when: nexus_initial_password.rc == 0
+      changed_when: true
+
+    - name: Licence, anonymous access, Docker logins, repository, roles and users
+      ansible.builtin.include_role:
+        name: nexus
+        tasks_from: configure

@@ -9,6 +9,17 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: taskpluse
 
+# Lets each node read per-registry settings from /etc/containerd/certs.d/ -
+# that's how the nodes are told that localhost:5001 (Nexus on this PC) lives at
+# its address on the kind network (scripts/kind-up.sh writes those files).
+# containerd only reads this at start, so it has to be set at cluster creation.
+containerdConfigPatches:
+  - |-
+    [plugins.'io.containerd.cri.v1.images'.registry]
+      config_path = '/etc/containerd/certs.d'
+    [plugins.'io.containerd.transfer.v1.local']
+      config_path = '/etc/containerd/certs.d'
+
 networking:
   # No default network plugin: Calico is installed instead, as on Vultr, because
   # it enforces NetworkPolicies (Phase 17). Until it is, nodes report NotReady.

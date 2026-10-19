@@ -1,0 +1,11 @@
+# containerd setting for images named localhost:5001/... (scripts/kind-up.sh
+# copies this to /etc/containerd/certs.d/localhost:5001/hosts.toml on every node).
+#
+# On this PC, localhost:5001 is Nexus's Docker port - that's where images are
+# pushed. Inside a node, localhost is the node itself, so pulls are sent to
+# Nexus's fixed address on the kind network instead (infra/compose.yaml).
+# Plain HTTP is acceptable only because this traffic never leaves the PC.
+server = "http://172.19.200.10:8082"
+
+[host."http://172.19.200.10:8082"]
+  capabilities = ["pull", "resolve"]

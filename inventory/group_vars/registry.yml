@@ -20,4 +20,4 @@ nexus_java_options: >-
 # License Agreement is accepted. Accepting it is the owner's decision, not the
 # playbook's: read https://links.sonatype.com/products/nxrm/ce-eula and change
 # this to true if you agree. setup-registry.yml stops with a message until then.
-nexus_accept_community_eula: false
+nexus_accept_community_eula: true

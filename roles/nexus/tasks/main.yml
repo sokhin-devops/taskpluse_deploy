@@ -15,5 +15,8 @@
 - name: Nexus container
   ansible.builtin.import_tasks: container.yml
 
+- name: Nexus admin password from the vault
+  ansible.builtin.import_tasks: admin-password.yml
+
 - name: Nexus settings, repository and accounts
   ansible.builtin.import_tasks: configure.yml
