@@ -17,6 +17,15 @@ deployment:
 ports:
   web:
     hostPort: 80
+    # Public traffic arrives through cloudflared (a Pod), which sets
+    # X-Forwarded-Proto: https because the visitor used HTTPS at Cloudflare.
+    # By default Traefik discards these headers from anyone; trusting the pod
+    # network lets them through, so the app knows the request was HTTPS.
+    # Without it Spring sees http, the browser's Origin says https, and every
+    # login is refused as "Invalid CORS request".
+    forwardedHeaders:
+      trustedIPs:
+        - 192.168.0.0/16
   websecure:
     hostPort: 443
 
