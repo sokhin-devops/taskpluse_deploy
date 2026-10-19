@@ -1,0 +1,26 @@
+# Calico pod network for the kind cluster - the same settings as the Vultr
+# cluster (roles/kubernetes/templates/calico-installation.yaml.j2), as a plain file.
+#
+# Install order (Calico 3.32.2):
+#   kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/operator-crds.yaml
+#   kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.2/manifests/tigera-operator.yaml
+#   kubectl apply  -f cluster/calico/installation.yaml
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    # Pod traffic between nodes is wrapped in UDP (VXLAN); no BGP needed.
+    bgp: Disabled
+    ipPools:
+      - name: default-ipv4-ippool
+        cidr: 192.168.0.0/16        # = podSubnet in cluster/kind/kind-config.yaml
+        blockSize: 26
+        encapsulation: VXLAN
+        natOutgoing: Enabled
+        nodeSelector: all()
+    # Use the address each kubelet registered (the node's 172.x address on the
+    # Docker "kind" network).
+    nodeAddressAutodetectionV4:
+      kubernetes: NodeInternalIP

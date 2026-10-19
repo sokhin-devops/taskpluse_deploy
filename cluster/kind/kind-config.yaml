@@ -1,0 +1,45 @@
+# The local Kubernetes cluster: 1 control plane + 2 workers, each a Docker
+# container set up by kubeadm (the same tool used on the Vultr servers).
+#
+#   kind create cluster --config cluster/kind/kind-config.yaml --kubeconfig ~/.kube/taskpluse.conf
+#   kind delete cluster --name taskpluse
+#
+# Delete and recreate at any time: everything that matters is in git.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: taskpluse
+
+networking:
+  # No default network plugin: Calico is installed instead, as on Vultr, because
+  # it enforces NetworkPolicies (Phase 17). Until it is, nodes report NotReady.
+  disableDefaultCNI: true
+  # Same ranges as the Vultr cluster, so every manifest and note still applies.
+  podSubnet: 192.168.0.0/16
+  serviceSubnet: 10.96.0.0/12
+
+# Kubernetes 1.36.4 (kind v0.33.0), pinned by digest: a tag can be re-pointed,
+# a digest can't. Calico 3.32 is tested against 1.34-1.36.
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+
+  # Traffic enters the cluster here: this node's ports 80/443 are published on
+  # the workstation, where Traefik (hostPort 80/443) picks them up. 127.0.0.1
+  # only - nothing on the local network or internet can reach it directly; public
+  # access comes later through the Cloudflare Tunnel.
+  - role: worker
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+    labels:
+      ingress-ready: "true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 80
+        listenAddress: 127.0.0.1
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        listenAddress: 127.0.0.1
+        protocol: TCP
+
+  - role: worker
+    image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
