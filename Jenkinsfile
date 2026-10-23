@@ -1,8 +1,8 @@
 // TaskPluse - CD pipeline (Jenkins job 'taskpluse-deploy', defined in
 // infra/jenkins/casc.yaml). The CI jobs start it after pushing an image:
 //
-//   Deploy to staging -> Smoke test staging -> Approve -> Deploy to prod
-//                     -> Smoke test prod
+//   Check image in Nexus -> Deploy to staging -> Smoke test staging -> Approve
+//                        -> Deploy to prod -> Smoke test prod
 //
 // Build once, deploy the same image everywhere: prod gets exactly the tag that
 // passed staging. Each environment has its own kubeconfig credential, whose
@@ -31,6 +31,33 @@ pipeline {
                     }
                     currentBuild.displayName = "#${env.BUILD_NUMBER} ${params.APP} ${params.TAG}"
                     env.DEPLOYED_BY = "jenkins taskpluse-deploy #${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Check image in Nexus') {
+            steps {
+                // Fail in seconds if the tag isn't in Nexus (never pushed, or
+                // lost) - otherwise Kubernetes only reports ImagePullBackOff and
+                // Helm waits its full 5 minutes before saying "not ready".
+                withCredentials([usernamePassword(credentialsId: 'nexus-push',
+                                                  usernameVariable: 'NEXUS_USER',
+                                                  passwordVariable: 'NEXUS_PASSWORD')]) {
+                    sh '''
+                        set +x   # no shell tracing: it would print the password
+                        image="localhost:5001/taskpluse-${APP}:${TAG}"
+                        # The password reaches curl on stdin (-K -), never as an
+                        # argument that `ps` could show.
+                        code=$(printf 'user = "%s:%s"\\n' "$NEXUS_USER" "$NEXUS_PASSWORD" \\
+                            | curl -s -K - -o /dev/null -w '%{http_code}' -I \\
+                                -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \\
+                                "http://taskpluse-nexus:8082/v2/taskpluse-${APP}/manifests/${TAG}")
+                        if [ "$code" != 200 ]; then
+                            echo "${image} is not in Nexus (HTTP ${code}). Run the taskpluse-${APP} CI job to build and push it."
+                            exit 1
+                        fi
+                        echo "${image} is in Nexus"
+                    '''
                 }
             }
         }
